@@ -1,0 +1,6 @@
+@ServerPilot_Api_HostAddress = http://localhost:5156
+
+GET {{ServerPilot_Api_HostAddress}}/health
+Accept: text/plain
+
+###

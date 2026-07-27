@@ -3,6 +3,11 @@
 [Bb]in/
 [Oo]bj/
 
+# Local environment and generated knowledge graph
+.env
+!.env.example
+graphify-out/
+
 # Visual Studio cache/options directory
 .vs/
 

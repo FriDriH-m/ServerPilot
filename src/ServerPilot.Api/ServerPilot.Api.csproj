@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../ServerPilot.Application/ServerPilot.Application.csproj" />
+    <ProjectReference Include="../ServerPilot.Infrastructure/ServerPilot.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

@@ -145,7 +145,7 @@ Frontend на React и TypeScript.
 
 Web Client не входит в самый ранний этап MVP.
 
-Первые сценарии могут проверяться через Swagger или HTTP-клиент.
+Первые сценарии могут проверяться через HTTP-клиент.
 
 ### ASP.NET Core API
 
