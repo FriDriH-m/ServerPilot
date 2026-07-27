@@ -480,3 +480,16 @@ A task is complete only when:
 - authorization was checked where applicable;
 - documentation was updated when behavior or setup changed;
 - remaining limitations were reported.
+
+## Graphify
+
+This repository may use Graphify to maintain a local knowledge graph of the codebase.
+
+When Graphify data is available:
+
+- use it to understand project structure, dependencies and affected components;
+- verify important conclusions against the actual source files;
+- do not treat the graph as the source of truth;
+- regenerate or update the graph after significant structural changes;
+- do not modify application architecture merely to improve the graph;
+- do not commit generated Graphify data unless the repository explicitly requires it.
