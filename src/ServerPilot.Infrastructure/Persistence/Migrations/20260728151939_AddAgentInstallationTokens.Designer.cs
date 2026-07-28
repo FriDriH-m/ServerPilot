@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using ServerPilot.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using ServerPilot.Infrastructure.Persistence;
 namespace ServerPilot.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ServerPilotDbContext))]
-    partial class ServerPilotDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260728151939_AddAgentInstallationTokens")]
+    partial class AddAgentInstallationTokens
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

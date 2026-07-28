@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Diagnostics;
 using ServerPilot.Api.Authentication;
 using ServerPilot.Api.Http;
 using ServerPilot.Application.Authentication;
+using ServerPilot.Application.InstallationTokens;
 using ServerPilot.Infrastructure;
 using ServerPilot.Infrastructure.Authentication;
 
@@ -19,9 +20,16 @@ JwtSettings jwtSettings = builder.Configuration
     throw new InvalidOperationException(
         $"Configuration section '{JwtSettings.SectionName}' is required.");
 
+AgentInstallationTokenOptions installationTokenOptions = builder.Configuration
+    .GetSection(AgentInstallationTokenOptions.SectionName)
+    .Get<AgentInstallationTokenOptions>() ?? new AgentInstallationTokenOptions();
+installationTokenOptions.Validate();
+
 builder.Services.AddInfrastructure(postgreSqlConnectionString, jwtSettings);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<UserAuthenticationService>();
+builder.Services.AddSingleton(installationTokenOptions);
+builder.Services.AddScoped<AgentInstallationTokenService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
 builder.Services.AddControllers();

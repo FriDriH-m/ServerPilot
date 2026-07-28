@@ -22,6 +22,7 @@ public sealed class ServerPilotApiFactory(string postgreSqlConnectionString)
         builder.UseSetting("Authentication:Jwt:Audience", JwtAudience);
         builder.UseSetting("Authentication:Jwt:SigningKey", JwtSigningKey);
         builder.UseSetting("Authentication:Jwt:AccessTokenLifetimeMinutes", "30");
+        builder.UseSetting("AgentInstallationTokens:LifetimeMinutes", "15");
         builder.ConfigureLogging(logging => logging.ClearProviders());
     }
 

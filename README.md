@@ -263,6 +263,24 @@ Email хранится в исходном trimmed-виде и отдельно 
 сравнения. Пароли сохраняются только как ASP.NET Core Identity hash. Refresh tokens,
 password reset, email confirmation и роли не входят в текущий MVP.
 
+### Installation tokens для Agent
+
+Аутентифицированный пользователь может создать одноразовый токен через
+`POST /api/agent-installation-tokens`, получить собственные метаданные через `GET` по
+тому же адресу и отозвать неиспользованный токен через
+`DELETE /api/agent-installation-tokens/{id}`.
+
+Исходное значение возвращается только при создании. В PostgreSQL сохраняется только
+SHA-256 hash; список не содержит ни исходного значения, ни hash. По умолчанию токен
+действует 15 минут. Для локального запуска срок можно изменить через конфигурацию:
+
+```powershell
+$env:AgentInstallationTokens__LifetimeMinutes = "15"
+```
+
+Допустимый диапазон — от 1 до 1 440 минут. Фактическое использование токена при
+регистрации Agent относится к следующей задаче MVP.
+
 ## Continuous integration
 
 Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) запускается для каждого pull request в `main` и каждого push в `main`.

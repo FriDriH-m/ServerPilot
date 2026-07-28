@@ -1,8 +1,9 @@
 # ServerPilot MVP threat model
 
 This lightweight model is updated when an active issue introduces a real trust
-boundary. It currently covers user authentication added by issue #18; Agent and
-local-process credentials will be expanded by their implementation issues.
+boundary. It currently covers user authentication from issue #18 and Agent installation
+tokens from issue #19; long-lived Agent credentials and the local-process boundary will
+be expanded by their implementation issues.
 
 ## Data flow and trust boundaries
 
@@ -11,15 +12,23 @@ User/client
   | HTTPS: email + password, then bearer JWT
   v
 ASP.NET Core API
-  | EF Core: normalized identity + password hash
+  | HTTPS response once: raw Agent installation token
+  | EF Core: normalized identity + password/token hashes + token state
   v
 PostgreSQL
+
+Future unregistered Agent
+  | HTTPS: raw one-time installation token
+  v
+ASP.NET Core API -> PostgreSQL: atomic consume + Agent creation (issue #20)
 
 Future flow: API -> authenticated Agent -> allow-listed local process operations
 ```
 
 The client/API and API/PostgreSQL transitions are trust boundaries. The JWT signing
-key is process configuration and never crosses to PostgreSQL or source control.
+key is process configuration and never crosses to PostgreSQL or source control. The
+raw installation token crosses the API boundary only in its creation response and is
+not recoverable from persisted data.
 
 ## Active threats and controls
 
@@ -32,10 +41,17 @@ key is process configuration and never crosses to PostgreSQL or source control.
 | Stolen access token | Short 30-minute lifetime; tokens are not persisted or logged | No immediate revocation or refresh-token flow |
 | Client-supplied ownership identifier | Authenticated user ID comes from the validated `sub` claim | Resource ownership enforcement begins when owned resources are implemented |
 | Secret committed to source | Signing key is required through environment/configuration and absent from appsettings | Operators must generate and protect a strong deployment-specific value |
+| Predictable installation credential | 256 random bits from .NET `RandomNumberGenerator`; a GUID or user identifier is never used as the credential | Entropy depends on the operating system CSPRNG |
+| Installation token disclosed by database or list API | PostgreSQL stores only a SHA-256 hash; list responses contain metadata only; raw value is returned once | A client that loses the response must revoke or wait for expiry and create another token |
+| Stolen installation token | 15-minute default lifetime, configurable bounded expiry and explicit revocation | The credential is bearer-only, so HTTPS and client-side protection remain mandatory |
+| Cross-user token access | List/revoke queries are scoped to the authenticated JWT subject; foreign IDs return 404 | Agent registration ownership will be bound during issue #20 |
+| Reuse of expired, revoked or used token | Domain transitions reject every inactive state; PostgreSQL prevents simultaneous used/revoked state | Atomic concurrent consume and Agent creation must be implemented and tested in issue #20 |
 
 ## Security invariants
 
 - Never log passwords, password hashes, bearer tokens or signing keys.
+- Never persist or return the raw Agent installation token after its creation response.
 - Never authorize ownership from a user ID supplied in a request body or route.
 - Only accept JWTs matching the configured issuer, audience and signing algorithm.
+- Consume an installation token atomically when Agent registration is implemented.
 - Use HTTPS outside local development.

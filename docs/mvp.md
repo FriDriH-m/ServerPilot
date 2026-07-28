@@ -119,6 +119,7 @@ UserId
 TokenHash
 ExpiresAt
 UsedAt
+RevokedAt
 CreatedAt
 ```
 
