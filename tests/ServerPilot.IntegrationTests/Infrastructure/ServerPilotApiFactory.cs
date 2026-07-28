@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using ServerPilot.Infrastructure.Persistence;
 
@@ -9,7 +10,8 @@ namespace ServerPilot.IntegrationTests.Infrastructure;
 
 public sealed class ServerPilotApiFactory(
     string postgreSqlConnectionString,
-    TestLogProvider? logProvider = null)
+    TestLogProvider? logProvider = null,
+    TimeProvider? timeProvider = null)
     : WebApplicationFactory<Program>
 {
     public const string JwtIssuer = "ServerPilot.IntegrationTests";
@@ -25,6 +27,16 @@ public sealed class ServerPilotApiFactory(
         builder.UseSetting("Authentication:Jwt:SigningKey", JwtSigningKey);
         builder.UseSetting("Authentication:Jwt:AccessTokenLifetimeMinutes", "30");
         builder.UseSetting("AgentInstallationTokens:LifetimeMinutes", "15");
+        builder.UseSetting("AgentAvailability:OfflineThresholdSeconds", "30");
+        if (timeProvider is not null)
+        {
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<TimeProvider>();
+                services.AddSingleton(timeProvider);
+            });
+        }
+
         builder.ConfigureLogging(logging =>
         {
             logging.ClearProviders();

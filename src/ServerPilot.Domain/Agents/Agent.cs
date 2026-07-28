@@ -64,6 +64,8 @@ public sealed class Agent
 
     public DateTimeOffset RegisteredAt { get; private set; }
 
+    public DateTimeOffset? LastSeenAt { get; private set; }
+
     public DateTimeOffset? CredentialRevokedAt { get; private set; }
 
     public static Agent Create(
@@ -84,6 +86,25 @@ public sealed class Agent
             version,
             credentialHash,
             registeredAt);
+
+    public bool RecordHeartbeat(DateTimeOffset receivedAt)
+    {
+        DateTimeOffset utcReceivedAt = receivedAt.ToUniversalTime();
+        if (utcReceivedAt < RegisteredAt)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(receivedAt),
+                "Agent heartbeat cannot be recorded before registration.");
+        }
+
+        if (LastSeenAt.HasValue && utcReceivedAt <= LastSeenAt.Value)
+        {
+            return false;
+        }
+
+        LastSeenAt = utcReceivedAt;
+        return true;
+    }
 
     public AgentCredentialRevocationResult RevokeCredentials(DateTimeOffset revokedAt)
     {

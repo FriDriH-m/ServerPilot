@@ -28,6 +28,11 @@ AgentInstallationTokenOptions installationTokenOptions = builder.Configuration
     .Get<AgentInstallationTokenOptions>() ?? new AgentInstallationTokenOptions();
 installationTokenOptions.Validate();
 
+AgentAvailabilityOptions agentAvailabilityOptions = builder.Configuration
+    .GetSection(AgentAvailabilityOptions.SectionName)
+    .Get<AgentAvailabilityOptions>() ?? new AgentAvailabilityOptions();
+agentAvailabilityOptions.Validate();
+
 ApiRateLimitOptions rateLimitOptions = builder.Configuration
     .GetSection(ApiRateLimitOptions.SectionName)
     .Get<ApiRateLimitOptions>() ?? new ApiRateLimitOptions();
@@ -37,9 +42,12 @@ builder.Services.AddInfrastructure(postgreSqlConnectionString, jwtSettings);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<AgentRegistrationService>();
 builder.Services.AddScoped<AgentCredentialAuthenticationService>();
+builder.Services.AddScoped<AgentHeartbeatService>();
+builder.Services.AddScoped<AgentQueryService>();
 builder.Services.AddScoped<AgentManagementService>();
 builder.Services.AddScoped<UserAuthenticationService>();
 builder.Services.AddSingleton(installationTokenOptions);
+builder.Services.AddSingleton(agentAvailabilityOptions);
 builder.Services.AddScoped<AgentInstallationTokenService>();
 builder.Services.AddServerPilotRateLimiting(rateLimitOptions);
 builder.Services.AddHttpContextAccessor();

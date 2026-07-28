@@ -41,9 +41,23 @@ public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
         Assert.Contains(
             appliedMigrations,
             migration => migration.EndsWith(
-                "_AddAgentRegistrationAndAuthentication",
+                "_AddAgentHeartbeatAndQueries",
                 StringComparison.Ordinal));
         Assert.Empty(await dbContext.Database.GetPendingMigrationsAsync(CancellationToken.None));
+
+        await dbContext.Database.OpenConnectionAsync(CancellationToken.None);
+        await using var indexCommand = dbContext.Database.GetDbConnection().CreateCommand();
+        indexCommand.CommandText = """
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND indexname = 'ix_agents_user_id_registered_at_id'
+            """;
+        string indexDefinition = Assert.IsType<string>(
+            await indexCommand.ExecuteScalarAsync(CancellationToken.None));
+        Assert.Contains("user_id", indexDefinition, StringComparison.Ordinal);
+        Assert.Contains("registered_at DESC", indexDefinition, StringComparison.Ordinal);
+        Assert.Contains("id DESC", indexDefinition, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -129,5 +143,19 @@ public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
         Assert.Equal(
             "ck_agents_valid_credential_revoked_at",
             invalidRevocation.ConstraintName);
+
+        PostgresException invalidLastSeen = await Assert.ThrowsAsync<PostgresException>(() =>
+            dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO agents
+                    (id, user_id, name, machine_name, operating_system, agent_version,
+                     credential_hash, registered_at, last_seen_at, credential_revoked_at)
+                VALUES
+                    ({Guid.NewGuid()}, {user.Id}, {"Agent"}, {"HOST"}, {"Windows"},
+                     {"1.0.0"}, {new string('c', 64)}, {registeredAt},
+                     {registeredAt.AddTicks(-10)}, NULL)
+                """, CancellationToken.None));
+        Assert.Equal(
+            "ck_agents_valid_last_seen_at",
+            invalidLastSeen.ConstraintName);
     }
 }

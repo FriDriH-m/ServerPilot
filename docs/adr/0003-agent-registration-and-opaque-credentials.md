@@ -27,8 +27,15 @@ take effect without waiting for an access-token lifetime.
 - Store `credential_revoked_at` on the Agent. Owner-scoped conditional revocation is
   idempotent, returns `404` for missing/foreign Agents, and blocks subsequent requests
   because authentication consults PostgreSQL each time.
-- Log registration, rejection and revocation with correlation/resource identifiers but
-  never log installation tokens, Agent credentials or their hashes.
+- Accept heartbeat only when the route Agent ID equals the ID resolved from the Agent
+  credential. Use the API server's UTC timestamp rather than a client-provided value,
+  and conditionally advance `last_seen_at` so delayed requests cannot move it backward.
+- Derive `Online` or `Offline` during owner-scoped reads from nullable `last_seen_at` and
+  a validated configuration threshold. The exact threshold boundary remains `Online`;
+  no persisted availability boolean or background status writer is used.
+- Log registration, rejection, revocation and heartbeat authorization failures with
+  correlation/resource identifiers but never log installation tokens, Agent credentials
+  or their hashes.
 
 ## Alternatives considered
 
@@ -42,6 +49,10 @@ take effect without waiting for an access-token lifetime.
   and rotate on Windows hosts.
 - Persist the raw credential: rejected because a database disclosure would expose every
   usable Agent identity.
+- Accept an Agent ID or timestamp from the heartbeat body: rejected because identity
+  comes from authentication and client clocks are not an availability authority.
+- Persist an `is_online` flag maintained by a background job: rejected because it adds
+  writes and scheduling failure modes for state that can be derived deterministically.
 
 ## Consequences
 
@@ -55,6 +66,9 @@ take effect without waiting for an access-token lifetime.
   old one until an explicit rotation flow is justified.
 - Used installation-token metadata may still be removed by its retention policy because
   the Agent's ownership and credential state are stored independently.
+- Availability reads use one configurable threshold and one captured server timestamp,
+  so every item in a list is evaluated consistently. Clock synchronization remains an
+  operational requirement for the API host.
 
 ## Verification evidence
 
@@ -63,3 +77,6 @@ take effect without waiting for an access-token lifetime.
   rejection of expired/revoked/used tokens, hash-only persistence and schema constraints.
 - API integration tests prove user/Agent scheme separation, exact Agent identity,
   owner-scoped revocation, rejection after revocation and absence of secrets in logs.
+- Heartbeat integration tests prove exact authenticated-Agent matching, server UTC,
+  monotonic concurrent updates, owner-only queries and both sides of the availability
+  threshold boundary.
