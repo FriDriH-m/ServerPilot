@@ -208,6 +208,7 @@ API
 
 - [`docs/product.md`](docs/product.md) — полное описание проекта и целевой архитектуры.
 - [`docs/mvp.md`](docs/mvp.md) — границы первой версии.
+- [`docs/api-conventions.md`](docs/api-conventions.md) — контракты API, валидация, Problem Details и correlation ID.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
 ## Запуск инфраструктуры
