@@ -5,10 +5,18 @@
     <File Path="AGENTS.md" />
     <File Path="Directory.Build.props" />
     <File Path="Directory.Packages.props" />
+    <File Path=".config/dotnet-tools.json" />
+    <File Path=".github/ISSUE_TEMPLATE/implementation.md" />
+    <File Path=".github/pull_request_template.md" />
     <File Path="README.md" />
     <File Path="docker-compose.yml" />
+    <File Path="docs/adr/0001-user-password-and-jwt-authentication.md" />
+    <File Path="docs/adr/0002-one-time-agent-installation-tokens.md" />
+    <File Path="docs/api-conventions.md" />
     <File Path="docs/mvp.md" />
     <File Path="docs/product.md" />
+    <File Path="docs/threat-model.md" />
+    <File Path="eng/verify.ps1" />
     <File Path="global.json" />
   </Folder>
   <Folder Name="/src/">

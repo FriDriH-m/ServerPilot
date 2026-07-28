@@ -210,17 +210,35 @@ API
 - [`docs/mvp.md`](docs/mvp.md) — границы первой версии.
 - [`docs/api-conventions.md`](docs/api-conventions.md) — контракты API, валидация, Problem Details и correlation ID.
 - [`docs/adr/0001-user-password-and-jwt-authentication.md`](docs/adr/0001-user-password-and-jwt-authentication.md) — решение по password hashing и JWT.
+- [`docs/adr/0002-one-time-agent-installation-tokens.md`](docs/adr/0002-one-time-agent-installation-tokens.md) — решение по одноразовым installation tokens.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
 ## Запуск инфраструктуры
 
-Создайте локальный файл окружения, задайте пароль PostgreSQL и замените
-`JWT_SIGNING_KEY` случайным значением длиной не менее 32 байт:
+Создайте локальный файл окружения. Значения в `.env.example` намеренно пустые:
+Compose не должен запускаться с известными публичными credentials.
 
 ```powershell
 Copy-Item .env.example .env
 ```
+
+Сгенерируйте независимые случайные значения и запишите их в `.env`:
+
+```powershell
+$postgresBytes = [byte[]]::new(24)
+$jwtBytes = [byte[]]::new(48)
+$generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$generator.GetBytes($postgresBytes)
+$generator.GetBytes($jwtBytes)
+[Convert]::ToBase64String($postgresBytes)
+[Convert]::ToBase64String($jwtBytes)
+$generator.Dispose()
+```
+
+Первый результат используйте как `POSTGRES_PASSWORD`, второй — как
+`JWT_SIGNING_KEY`. API дополнительно отклоняет публичное placeholder-значение, даже
+если оно формально длиннее 32 байт.
 
 Запустите API и PostgreSQL:
 
@@ -253,10 +271,10 @@ API предоставляет `POST /api/auth/register`, `POST /api/auth/login`
 Передавайте его в заголовке `Authorization: Bearer <token>`.
 
 Signing key не хранится в `appsettings.json`. Для локального запуска без Compose
-задайте его через environment variable:
+задайте сгенерированное случайное значение через environment variable:
 
 ```powershell
-$env:Authentication__Jwt__SigningKey = "<at-least-32-random-bytes>"
+$env:Authentication__Jwt__SigningKey = "<random-value-with-at-least-32-utf8-bytes>"
 ```
 
 Email хранится в исходном trimmed-виде и отдельно нормализуется для уникального
@@ -278,29 +296,39 @@ SHA-256 hash; список не содержит ни исходного зна�
 $env:AgentInstallationTokens__LifetimeMinutes = "15"
 ```
 
-Допустимый диапазон — от 1 до 1 440 минут. Фактическое использование токена при
-регистрации Agent относится к следующей задаче MVP.
+Допустимый диапазон — от 1 до 1 440 минут. Один пользователь может иметь не более
+10 активных токенов одновременно; значение настраивается через
+`AgentInstallationTokens__MaximumActiveTokensPerUser`. `GET` возвращает не более
+50 последних записей по умолчанию и принимает `limit` от 1 до 100 и `page` от 1 до
+1 000. Использованные, отозванные или просроченные метаданные старше 90 дней
+удаляются при следующем создании токена этого пользователя; срок настраивается через
+`AgentInstallationTokens__MetadataRetentionDays`. Фактическое использование токена
+при регистрации Agent относится к следующей задаче MVP.
+
+Login/register ограничены десятью запросами в минуту на клиентский IP, а операции
+аутентифицированного пользователя — тридцатью запросами в минуту на `sub`. Значения
+настраиваются в секции `RateLimiting`. Ответы, содержащие JWT или исходный installation
+token, помечены `Cache-Control: no-store`.
 
 ## Continuous integration
 
 Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) запускается для каждого pull request в `main` и каждого push в `main`.
 
-CI использует те же команды, которые можно выполнить локально:
+CI и локальная разработка используют один канонический сценарий:
 
-```bash
-docker info
-dotnet restore ServerPilot.slnx
-dotnet build ServerPilot.slnx --configuration Release --no-restore
-dotnet format ServerPilot.slnx --verify-no-changes --no-restore
-dotnet test tests/ServerPilot.UnitTests/ServerPilot.UnitTests.csproj --configuration Release --no-build --no-restore --logger "trx;LogFileName=unit-tests.trx" --results-directory artifacts/test-results/unit
-dotnet test tests/ServerPilot.IntegrationTests/ServerPilot.IntegrationTests.csproj --configuration Release --no-build --no-restore --logger "trx;LogFileName=integration-tests.trx" --results-directory artifacts/test-results/integration
+```powershell
+./eng/verify.ps1
 ```
+
+Он выполняет NuGet restore/audit, Release build, formatting, unit- и PostgreSQL
+integration-тесты, проверку соответствия EF-модели миграциям, проверку Compose и
+сборку Docker-образа API. `-SkipDockerBuild` пропускает только последнюю операцию.
 
 Integration-тесты используют Testcontainers и создают временный PostgreSQL-контейнер из образа `postgres:18.4-alpine`. На GitHub-hosted Ubuntu runner Docker уже доступен, поэтому отдельный PostgreSQL service container и credentials в workflow не нужны. Для локального запуска integration-тестов должен работать Docker Desktop или другой совместимый Docker daemon.
 
 NuGet Audit явно включён для прямых и транзитивных зависимостей. Поскольку warnings считаются errors, найденная уязвимость завершает restore с ошибкой и остаётся видимой в логе job. При падении тестов CI сохраняет TRX-файлы как artifact на семь дней.
 
-Кеш NuGet намеренно не настроен: его следует добавлять только после измерения времени restore. Сборка Docker-образа будет добавлена после завершения #32.
+Кеш NuGet намеренно не настроен: его следует добавлять только после измерения времени restore.
 
 ### Применение миграций PostgreSQL
 
@@ -313,11 +341,19 @@ $env:ConnectionStrings__PostgreSql = "Host=localhost;Port=5432;Database=serverpi
 Затем примените миграции:
 
 ```bash
+dotnet tool restore
 dotnet ef database update --project src/ServerPilot.Infrastructure --startup-project src/ServerPilot.Infrastructure
 ```
 
+`/health/live` проверяет только работу процесса API. `/health/ready` и совместимый
+`/health` дополнительно требуют доступный PostgreSQL без неприменённых миграций.
+До завершения #32 миграции применяются явно приведённой выше командой; readiness не
+позволяет ошибочно считать чистую базу готовой.
+
 ## Статус проекта
 
-Базовая структура solution подготовлена: созданы проекты Domain, Application, Infrastructure, API, Agent и тестовые проекты.
+Завершены foundation, PostgreSQL, API conventions, CI, пользовательская JWT-аутентификация
+и одноразовые Agent installation tokens. Следующая функциональная задача — #20,
+регистрация и отдельная аутентификация Agent.
 
 Текущая цель — реализовать минимальный рабочий вертикальный сценарий без преждевременного добавления сложной инфраструктуры.

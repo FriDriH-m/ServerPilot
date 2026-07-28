@@ -6,6 +6,7 @@ namespace ServerPilot.Infrastructure.Authentication;
 public sealed class JwtSettings
 {
     public const string SectionName = "Authentication:Jwt";
+    public const string UnsafeExampleSigningKey = "replace-with-at-least-32-random-bytes";
 
     public string Issuer { get; init; } = string.Empty;
 
@@ -35,6 +36,12 @@ public sealed class JwtSettings
         {
             throw new InvalidOperationException(
                 $"Configuration '{SectionName}:SigningKey' must contain at least 32 UTF-8 bytes.");
+        }
+
+        if (string.Equals(SigningKey, UnsafeExampleSigningKey, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Configuration '{SectionName}:SigningKey' must not use the public example value.");
         }
 
         if (AccessTokenLifetimeMinutes is < 1 or > 1440)

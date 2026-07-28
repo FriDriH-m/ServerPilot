@@ -9,4 +9,10 @@ public interface IUserRepository
         CancellationToken cancellationToken);
 
     Task<bool> TryAddAsync(User user, CancellationToken cancellationToken);
+
+    Task UpdatePasswordHashAsync(
+        Guid userId,
+        string currentPasswordHash,
+        string newPasswordHash,
+        CancellationToken cancellationToken);
 }

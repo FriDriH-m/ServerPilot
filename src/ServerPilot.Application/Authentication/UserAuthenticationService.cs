@@ -53,13 +53,23 @@ public sealed class UserAuthenticationService(
             normalizedEmail,
             cancellationToken);
 
-        bool passwordIsValid = passwordHashing.VerifyPassword(
+        PasswordVerificationOutcome passwordVerification = passwordHashing.VerifyPassword(
             user?.Id,
             user?.PasswordHash,
             password);
-        if (user is null || !passwordIsValid)
+        if (user is null || !passwordVerification.IsValid)
         {
             return null;
+        }
+
+        if (passwordVerification.RequiresRehash)
+        {
+            string updatedPasswordHash = passwordHashing.HashPassword(user.Id, password);
+            await users.UpdatePasswordHashAsync(
+                user.Id,
+                user.PasswordHash,
+                updatedPasswordHash,
+                cancellationToken);
         }
 
         return CreateSession(user, timeProvider.GetUtcNow());

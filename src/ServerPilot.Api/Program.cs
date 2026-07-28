@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using ServerPilot.Api.Authentication;
+using ServerPilot.Api.Health;
 using ServerPilot.Api.Http;
 using ServerPilot.Application.Authentication;
 using ServerPilot.Application.InstallationTokens;
@@ -25,11 +27,17 @@ AgentInstallationTokenOptions installationTokenOptions = builder.Configuration
     .Get<AgentInstallationTokenOptions>() ?? new AgentInstallationTokenOptions();
 installationTokenOptions.Validate();
 
+ApiRateLimitOptions rateLimitOptions = builder.Configuration
+    .GetSection(ApiRateLimitOptions.SectionName)
+    .Get<ApiRateLimitOptions>() ?? new ApiRateLimitOptions();
+rateLimitOptions.Validate();
+
 builder.Services.AddInfrastructure(postgreSqlConnectionString, jwtSettings);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<UserAuthenticationService>();
 builder.Services.AddSingleton(installationTokenOptions);
 builder.Services.AddScoped<AgentInstallationTokenService>();
+builder.Services.AddServerPilotRateLimiting(rateLimitOptions);
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
 builder.Services.AddControllers();
@@ -43,7 +51,10 @@ builder.Services.AddProblemDetails(options =>
     };
 });
 builder.Services.AddAuthorization();
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks()
+    .AddCheck<PostgreSqlReadinessHealthCheck>(
+        "postgresql",
+        tags: ["ready"]);
 
 var app = builder.Build();
 
@@ -55,10 +66,20 @@ app.UseExceptionHandler(new ExceptionHandlerOptions
 app.UseStatusCodePages();
 app.UseHttpsRedirection();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapControllers();
-app.MapHealthChecks("/health");
+HealthCheckOptions readinessOptions = new()
+{
+    Predicate = registration => registration.Tags.Contains("ready"),
+};
+app.MapHealthChecks("/health", readinessOptions);
+app.MapHealthChecks("/health/ready", readinessOptions);
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = static _ => false,
+});
 
 app.Run();
 

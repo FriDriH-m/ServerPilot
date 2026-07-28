@@ -2,6 +2,9 @@ namespace ServerPilot.Domain.Commands;
 
 public sealed class ServerCommand
 {
+    public const int MaximumErrorCodeLength = 64;
+    public const int MaximumErrorMessageLength = 2_048;
+
     public ServerCommand(
         Guid id,
         Guid agentId,
@@ -14,7 +17,12 @@ public sealed class ServerCommand
         AgentId = RequireIdentifier(agentId, nameof(agentId));
         ServerInstanceId = RequireIdentifier(serverInstanceId, nameof(serverInstanceId));
         CorrelationId = RequireIdentifier(correlationId, nameof(correlationId));
-        Type = type;
+        Type = Enum.IsDefined(type)
+            ? type
+            : throw new ArgumentOutOfRangeException(
+                nameof(type),
+                type,
+                "Unsupported server command type.");
         CreatedAt = createdAt.ToUniversalTime();
         Status = ServerCommandStatus.Pending;
     }
@@ -79,6 +87,19 @@ public sealed class ServerCommand
 
         ArgumentException.ThrowIfNullOrWhiteSpace(errorCode);
         ArgumentException.ThrowIfNullOrWhiteSpace(errorMessage);
+        if (errorCode.Length > MaximumErrorCodeLength)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(errorCode),
+                $"Error code must not exceed {MaximumErrorCodeLength} characters.");
+        }
+
+        if (errorMessage.Length > MaximumErrorMessageLength)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(errorMessage),
+                $"Error message must not exceed {MaximumErrorMessageLength} characters.");
+        }
 
         CompletedAt = NormalizeTransitionTime(completedAt, StartedAt!.Value, nameof(completedAt));
         ErrorCode = errorCode;

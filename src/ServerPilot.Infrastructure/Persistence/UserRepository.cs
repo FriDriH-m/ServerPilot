@@ -37,4 +37,19 @@ internal sealed class UserRepository(ServerPilotDbContext dbContext) : IUserRepo
             return false;
         }
     }
+
+    public Task UpdatePasswordHashAsync(
+        Guid userId,
+        string currentPasswordHash,
+        string newPasswordHash,
+        CancellationToken cancellationToken) =>
+        dbContext.Users
+            .Where(user =>
+                user.Id == userId &&
+                user.PasswordHash == currentPasswordHash)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(
+                    user => user.PasswordHash,
+                    newPasswordHash),
+                cancellationToken);
 }

@@ -33,6 +33,14 @@ public sealed class AgentInstallationToken
                 nameof(tokenHash));
         }
 
+        if (tokenHash.Any(character =>
+            character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
+        {
+            throw new ArgumentException(
+                "Installation token hash must use lowercase hexadecimal characters.",
+                nameof(tokenHash));
+        }
+
         DateTimeOffset utcCreatedAt = createdAt.ToUniversalTime();
         DateTimeOffset utcExpiresAt = expiresAt.ToUniversalTime();
         if (utcExpiresAt <= utcCreatedAt)

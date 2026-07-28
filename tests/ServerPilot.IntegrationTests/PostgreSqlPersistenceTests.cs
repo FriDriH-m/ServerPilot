@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
+using ServerPilot.Domain.Users;
 using ServerPilot.Infrastructure.Persistence;
 using ServerPilot.IntegrationTests.Infrastructure;
 
@@ -38,6 +40,52 @@ public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
 
         Assert.Contains(
             appliedMigrations,
-            migration => migration.EndsWith("_InitialInfrastructure", StringComparison.Ordinal));
+            migration => migration.EndsWith(
+                "_HardenInstallationTokenConstraints",
+                StringComparison.Ordinal));
+        Assert.Empty(await dbContext.Database.GetPendingMigrationsAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DatabaseRejectsInvalidInstallationTokenTimestampsAndHashes()
+    {
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        ServerPilotDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+        User user = User.Create(
+            Guid.NewGuid(),
+            "constraints@example.com",
+            "CONSTRAINTS@EXAMPLE.COM",
+            "test-password-hash",
+            DateTimeOffset.UtcNow);
+        dbContext.Users.Add(user);
+        await dbContext.SaveChangesAsync(CancellationToken.None);
+        DateTimeOffset createdAt = DateTimeOffset.UtcNow;
+        DateTimeOffset expiresAt = createdAt.AddMinutes(15);
+        DateTimeOffset invalidUsedAt = createdAt.AddSeconds(-1);
+
+        PostgresException invalidTimestamp = await Assert.ThrowsAsync<PostgresException>(() =>
+            dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO agent_installation_tokens
+                    (id, user_id, token_hash, created_at, expires_at, used_at, revoked_at)
+                VALUES
+                    ({Guid.NewGuid()}, {user.Id}, {new string('a', 64)}, {createdAt},
+                     {expiresAt}, {invalidUsedAt}, NULL)
+                """, CancellationToken.None));
+        Assert.Equal(
+            "ck_agent_installation_tokens_valid_used_at",
+            invalidTimestamp.ConstraintName);
+
+        PostgresException invalidHash = await Assert.ThrowsAsync<PostgresException>(() =>
+            dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO agent_installation_tokens
+                    (id, user_id, token_hash, created_at, expires_at, used_at, revoked_at)
+                VALUES
+                    ({Guid.NewGuid()}, {user.Id}, {new string('A', 64)}, {createdAt},
+                     {expiresAt}, NULL, NULL)
+                """, CancellationToken.None));
+        Assert.Equal(
+            "ck_agent_installation_tokens_valid_token_hash",
+            invalidHash.ConstraintName);
     }
 }

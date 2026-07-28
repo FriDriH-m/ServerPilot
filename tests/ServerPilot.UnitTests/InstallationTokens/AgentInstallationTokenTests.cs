@@ -15,6 +15,17 @@ public sealed class AgentInstallationTokenTests
     }
 
     [Fact]
+    public void CreateRequiresCanonicalLowercaseHexadecimalHash()
+    {
+        Assert.Throws<ArgumentException>(() => AgentInstallationToken.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            new string('G', AgentInstallationToken.TokenHashLength),
+            CreatedAt,
+            CreatedAt.AddMinutes(15)));
+    }
+
+    [Fact]
     public void NewTokenIsActiveBeforeExpirationAndExpiredAtBoundary()
     {
         AgentInstallationToken token = CreateToken(CreatedAt.AddMinutes(15));
