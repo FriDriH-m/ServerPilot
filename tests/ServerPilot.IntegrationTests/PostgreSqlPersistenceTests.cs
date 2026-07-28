@@ -1,33 +1,43 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using ServerPilot.Infrastructure.Persistence;
-using Testcontainers.PostgreSql;
+using ServerPilot.IntegrationTests.Infrastructure;
 
 namespace ServerPilot.IntegrationTests;
 
-public sealed class PostgreSqlPersistenceTests : IAsyncLifetime
+[Collection(PostgreSqlTestGroup.Name)]
+public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
 {
-    private readonly PostgreSqlContainer postgreSql = new PostgreSqlBuilder("postgres:18.4-alpine").Build();
+    private readonly ServerPilotApiFactory factory;
 
-    public async Task InitializeAsync()
+    public PostgreSqlPersistenceTests(PostgreSqlDatabaseFixture database)
     {
-        await postgreSql.StartAsync(CancellationToken.None);
+        factory = new ServerPilotApiFactory(database.ConnectionString);
     }
 
-    public async Task DisposeAsync()
+    public Task InitializeAsync() => factory.ResetDatabaseAsync(CancellationToken.None);
+
+    public Task DisposeAsync() => Task.CompletedTask;
+
+    public void Dispose()
     {
-        await postgreSql.DisposeAsync();
+        factory.Dispose();
     }
 
     [Fact]
-    public async Task DbContextConnectsToPostgreSql()
+    public async Task ApiDbContextConnectsAndHasAppliedMigration()
     {
-        DbContextOptions<ServerPilotDbContext> options =
-            new DbContextOptionsBuilder<ServerPilotDbContext>()
-                .UseNpgsql(postgreSql.GetConnectionString())
-                .Options;
-
-        await using var dbContext = new ServerPilotDbContext(options);
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        ServerPilotDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
 
         Assert.True(await dbContext.Database.CanConnectAsync(CancellationToken.None));
+
+        string[] appliedMigrations =
+            [.. await dbContext.Database.GetAppliedMigrationsAsync(CancellationToken.None)];
+
+        Assert.Contains(
+            appliedMigrations,
+            migration => migration.EndsWith("_InitialInfrastructure", StringComparison.Ordinal));
     }
 }

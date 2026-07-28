@@ -1,19 +1,28 @@
 using System.Net;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.Logging;
+using ServerPilot.IntegrationTests.Infrastructure;
 
 namespace ServerPilot.IntegrationTests;
 
-public sealed class ApiHealthTests : IClassFixture<WebApplicationFactory<Program>>
+[Collection(PostgreSqlTestGroup.Name)]
+public sealed class ApiHealthTests : IAsyncLifetime, IDisposable
 {
+    private readonly ServerPilotApiFactory factory;
     private readonly HttpClient client;
 
-    public ApiHealthTests(WebApplicationFactory<Program> factory)
+    public ApiHealthTests(PostgreSqlDatabaseFixture database)
     {
-        client = factory
-            .WithWebHostBuilder(builder => builder.ConfigureLogging(logging => logging.ClearProviders()))
-            .CreateClient();
+        factory = new ServerPilotApiFactory(database.ConnectionString);
+        client = factory.CreateClient();
+    }
+
+    public Task InitializeAsync() => factory.ResetDatabaseAsync(CancellationToken.None);
+
+    public Task DisposeAsync() => Task.CompletedTask;
+
+    public void Dispose()
+    {
+        client.Dispose();
+        factory.Dispose();
     }
 
     [Fact]
