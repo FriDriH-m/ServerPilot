@@ -47,6 +47,31 @@ public sealed class AgentTests
     }
 
     [Fact]
+    public void RecordHeartbeatPreservesLatestTimestamp()
+    {
+        Agent agent = CreateAgent();
+        DateTimeOffset latestHeartbeat = RegisteredAt.AddSeconds(20);
+
+        bool firstRecorded = agent.RecordHeartbeat(latestHeartbeat);
+        bool staleRecorded = agent.RecordHeartbeat(RegisteredAt.AddSeconds(10));
+        bool duplicateRecorded = agent.RecordHeartbeat(latestHeartbeat);
+
+        Assert.True(firstRecorded);
+        Assert.False(staleRecorded);
+        Assert.False(duplicateRecorded);
+        Assert.Equal(latestHeartbeat, agent.LastSeenAt);
+    }
+
+    [Fact]
+    public void RecordHeartbeatRejectsTimestampBeforeRegistration()
+    {
+        Agent agent = CreateAgent();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            agent.RecordHeartbeat(RegisteredAt.AddTicks(-1)));
+    }
+
+    [Fact]
     public void RevokeCredentialsIsIdempotentAndPreservesFirstTimestamp()
     {
         Agent agent = CreateAgent();

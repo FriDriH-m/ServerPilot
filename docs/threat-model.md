@@ -27,6 +27,12 @@ Registered Agent
   | Authorization: Agent <credential>
   v
 ASP.NET Core API -> PostgreSQL: credential-hash lookup + revocation state
+  | authenticated heartbeat: server UTC only
+  v
+PostgreSQL: monotonic last_seen_at
+
+User/client -> ASP.NET Core API -> PostgreSQL: owner-scoped Agent metadata query
+  | response: safe metadata + derived Online/Offline state
 
 Future flow: API -> authenticated Agent -> allow-listed local process operations
 ```
@@ -53,11 +59,14 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Predictable installation credential | 256 random bits from .NET `RandomNumberGenerator`; a GUID or user identifier is never used as the credential | Entropy depends on the operating system CSPRNG |
 | Installation token disclosed by database or list API | PostgreSQL stores only a SHA-256 hash; list responses contain metadata only; raw value is returned once | A client that loses the response must revoke or wait for expiry and create another token |
 | Stolen installation token | 15-minute default lifetime, configurable bounded expiry and explicit revocation | The credential is bearer-only, so HTTPS and client-side protection remain mandatory |
-| Cross-user token or Agent access | Installation-token and Agent-credential revocation are scoped to the JWT subject; foreign IDs return 404 | User Agent listing is implemented in issue #21 |
+| Cross-user token or Agent access | Installation-token operations, Agent reads and credential revocation are scoped to the JWT subject; foreign IDs return 404 | Every future owned resource must preserve the same owner-scoped query pattern |
 | Reuse of expired, revoked or used installation token | Agent creation and conditional token consumption share one transaction; inactive/concurrently consumed tokens update zero rows | PostgreSQL remains the single registration authority |
 | Agent credential disclosed by database | 256 random bits; only a SHA-256 hash is persisted and indexed | The raw bearer credential must be stored securely by the Agent in issue #26 |
 | User/Agent principal confusion | User endpoints use the default Bearer JWT scheme; Agent endpoints require an explicit Agent policy and claim | Every future heartbeat/command endpoint must select the Agent policy |
 | Stolen or revoked Agent credential | Authentication checks the hash and `credential_revoked_at` in PostgreSQL on every request; the owner can revoke credentials | Credentials do not expire or rotate automatically in the MVP; an in-flight request is not cancelled |
+| Agent submits heartbeat for another Agent | The route ID must equal the exact Agent ID resolved by authentication; mismatches return 404 and do not write | A credential still acts as its own Agent until revoked |
+| Client clock forges or regresses liveness | Heartbeat has no client timestamp; server UTC conditionally advances `last_seen_at`, and PostgreSQL rejects values before registration | API host clock synchronization is an operational dependency |
+| Persisted availability becomes stale | `Online`/`Offline` is derived during reads from `last_seen_at` and a validated threshold; no boolean or scheduled status write exists | Status is a recent-contact signal, not proof that the local process is healthy |
 | Security operation has no audit trail | User/Agent registration, login, token operations and credential revocation emit structured events with identifiers but no credential values | Full API/Agent correlation remains in issue #31 |
 
 ## Security invariants
@@ -69,4 +78,7 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 - Only accept JWTs matching the configured issuer, audience and signing algorithm.
 - Consume an installation token and create its Agent in one transaction.
 - Never accept an Agent credential as a user JWT or a user JWT as Agent authentication.
+- A heartbeat may update only the Agent identity resolved from its credential.
+- Never trust a client-provided timestamp for Agent availability.
+- Scope every Agent read to the authenticated user before projecting metadata.
 - Use HTTPS outside local development.

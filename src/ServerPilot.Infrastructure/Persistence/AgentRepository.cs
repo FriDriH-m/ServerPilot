@@ -87,6 +87,49 @@ internal sealed class AgentRepository(ServerPilotDbContext dbContext) : IAgentRe
             .Select(agent => new AuthenticatedAgentIdentity(agent.Id, agent.UserId))
             .SingleOrDefaultAsync(cancellationToken);
 
+    public async Task RecordHeartbeatAsync(
+        Guid agentId,
+        DateTimeOffset receivedAt,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset utcReceivedAt = receivedAt.ToUniversalTime();
+        await dbContext.Agents
+            .Where(agent =>
+                agent.Id == agentId &&
+                agent.RegisteredAt <= utcReceivedAt &&
+                (agent.LastSeenAt == null || agent.LastSeenAt < utcReceivedAt))
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(
+                    agent => agent.LastSeenAt,
+                    utcReceivedAt),
+                cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<AgentMetadata>> ListOwnedAsync(
+        Guid userId,
+        int skip,
+        int limit,
+        CancellationToken cancellationToken) =>
+        await ProjectMetadata(
+                dbContext.Agents
+                    .AsNoTracking()
+                    .Where(agent => agent.UserId == userId)
+                    .OrderByDescending(agent => agent.RegisteredAt)
+                    .ThenByDescending(agent => agent.Id))
+            .Skip(skip)
+            .Take(limit)
+            .ToArrayAsync(cancellationToken);
+
+    public Task<AgentMetadata?> FindOwnedAsync(
+        Guid agentId,
+        Guid userId,
+        CancellationToken cancellationToken) =>
+        ProjectMetadata(
+                dbContext.Agents
+                    .AsNoTracking()
+                    .Where(agent => agent.Id == agentId && agent.UserId == userId))
+            .SingleOrDefaultAsync(cancellationToken);
+
     public async Task<RevokeAgentCredentialStatus> RevokeOwnedCredentialsAsync(
         Guid agentId,
         Guid userId,
@@ -134,4 +177,15 @@ internal sealed class AgentRepository(ServerPilotDbContext dbContext) : IAgentRe
     private sealed record AgentRevocationState(
         DateTimeOffset RegisteredAt,
         DateTimeOffset? CredentialRevokedAt);
+
+    private static IQueryable<AgentMetadata> ProjectMetadata(
+        IQueryable<AgentEntity> query) =>
+        query.Select(agent => new AgentMetadata(
+            agent.Id,
+            agent.Name,
+            agent.MachineName,
+            agent.OperatingSystem,
+            agent.Version,
+            agent.RegisteredAt,
+            agent.LastSeenAt));
 }

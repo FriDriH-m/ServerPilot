@@ -20,6 +20,22 @@ public interface IAgentRepository
         string credentialHash,
         CancellationToken cancellationToken);
 
+    Task RecordHeartbeatAsync(
+        Guid agentId,
+        DateTimeOffset receivedAt,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<AgentMetadata>> ListOwnedAsync(
+        Guid userId,
+        int skip,
+        int limit,
+        CancellationToken cancellationToken);
+
+    Task<AgentMetadata?> FindOwnedAsync(
+        Guid agentId,
+        Guid userId,
+        CancellationToken cancellationToken);
+
     Task<RevokeAgentCredentialStatus> RevokeOwnedCredentialsAsync(
         Guid agentId,
         Guid userId,

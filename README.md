@@ -325,6 +325,27 @@ Authorization: Agent spac_<64 uppercase hex characters>
 следующий Agent-запрос получает `401`. Credential не имеет автоматического срока
 действия в MVP, поэтому HTTPS и безопасное локальное хранение в issue #26 обязательны.
 
+### Heartbeat и доступность Agent
+
+Аутентифицированный Agent отправляет heartbeat через
+`POST /api/agents/{id}/heartbeat`. Route ID должен совпадать с Agent ID из проверенного
+credential; JWT пользователя и credential другого Agent не принимаются. API не доверяет
+timestamp клиента: `LastSeenAt` устанавливается по серверному UTC и не может сдвинуться
+назад при параллельных или переупорядоченных запросах.
+
+Пользователь получает только собственные Agent через `GET /api/agents` и
+`GET /api/agents/{id}`. Ответ содержит безопасные метаданные, `LastSeenAt` и вычисляемый
+статус `Online`/`Offline`, но не credential и не его hash. Agent без heartbeat считается
+`Offline`; heartbeat точно на границе threshold ещё считается `Online`. Threshold не
+хранится в базе и настраивается в диапазоне от 1 секунды до 24 часов:
+
+```powershell
+$env:AgentAvailability__OfflineThresholdSeconds = "30"
+```
+
+Отдельный background job не записывает `Offline`: статус вычисляется при чтении, поэтому
+не устаревает из-за пропущенного планового обновления.
+
 Login/register ограничены десятью запросами в минуту на клиентский IP, а операции
 аутентифицированного пользователя — тридцатью запросами в минуту на `sub`. Значения
 настраиваются в секции `RateLimiting`. Ответы, содержащие JWT, исходный installation
@@ -373,7 +394,8 @@ dotnet ef database update --project src/ServerPilot.Infrastructure --startup-pro
 ## Статус проекта
 
 Завершены foundation, PostgreSQL, API conventions, CI, пользовательская JWT-аутентификация,
-одноразовые Agent installation tokens, регистрация и отдельная аутентификация Agent.
-Следующая функциональная задача — #21, heartbeat и пользовательские Agent queries.
+одноразовые Agent installation tokens, регистрация, отдельная аутентификация, heartbeat
+и пользовательские Agent queries. Следующая функциональная задача — #22,
+ServerInstance configuration и ownership.
 
 Текущая цель — реализовать минимальный рабочий вертикальный сценарий без преждевременного добавления сложной инфраструктуры.
