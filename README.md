@@ -242,6 +242,20 @@ dotnet test
 dotnet format --verify-no-changes
 ```
 
+### Применение миграций PostgreSQL
+
+Перед локальным применением миграций задайте строку подключения через переменную окружения, не сохраняя пароль в репозитории:
+
+```powershell
+$env:ConnectionStrings__PostgreSql = "Host=localhost;Port=5432;Database=serverpilot;Username=serverpilot;Password=<local-password>"
+```
+
+Затем примените миграции:
+
+```bash
+dotnet ef database update --project src/ServerPilot.Infrastructure --startup-project src/ServerPilot.Infrastructure
+```
+
 ## Статус проекта
 
 Базовая структура solution подготовлена: созданы проекты Domain, Application, Infrastructure, API, Agent и тестовые проекты.
