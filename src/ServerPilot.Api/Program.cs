@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Diagnostics;
+using ServerPilot.Api.Authentication;
 using ServerPilot.Api.Http;
+using ServerPilot.Application.Authentication;
 using ServerPilot.Infrastructure;
+using ServerPilot.Infrastructure.Authentication;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,7 +13,17 @@ if (string.IsNullOrWhiteSpace(postgreSqlConnectionString))
     throw new InvalidOperationException("Connection string 'PostgreSql' is required.");
 }
 
-builder.Services.AddInfrastructure(postgreSqlConnectionString);
+JwtSettings jwtSettings = builder.Configuration
+    .GetRequiredSection(JwtSettings.SectionName)
+    .Get<JwtSettings>() ??
+    throw new InvalidOperationException(
+        $"Configuration section '{JwtSettings.SectionName}' is required.");
+
+builder.Services.AddInfrastructure(postgreSqlConnectionString, jwtSettings);
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<UserAuthenticationService>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails(options =>
 {
@@ -33,6 +46,7 @@ app.UseExceptionHandler(new ExceptionHandlerOptions
 });
 app.UseStatusCodePages();
 app.UseHttpsRedirection();
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
