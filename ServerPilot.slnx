@@ -12,6 +12,7 @@
     <File Path="docker-compose.yml" />
     <File Path="docs/adr/0001-user-password-and-jwt-authentication.md" />
     <File Path="docs/adr/0002-one-time-agent-installation-tokens.md" />
+    <File Path="docs/adr/0003-agent-registration-and-opaque-credentials.md" />
     <File Path="docs/api-conventions.md" />
     <File Path="docs/mvp.md" />
     <File Path="docs/product.md" />

@@ -51,3 +51,13 @@
 - Логи, созданные во время обработки запроса, получают structured scope `CorrelationId`.
 
 Correlation ID предназначен для поиска связанных логов и не заменяет идентификаторы пользователя, Agent, ServerInstance или команды.
+
+## Authentication schemes
+
+- Пользовательские endpoint принимают `Authorization: Bearer <jwt>` и получают user ID
+  только из проверенного `sub` claim.
+- Agent endpoint явно используют Agent policy и принимают
+  `Authorization: Agent <credential>`.
+- Схемы не взаимозаменяемы: Agent credential не даёт пользовательских прав, а JWT
+  пользователя не идентифицирует Agent.
+- Raw credentials возвращаются только один раз и помечаются `Cache-Control: no-store`.

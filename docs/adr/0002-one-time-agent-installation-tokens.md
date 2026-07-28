@@ -32,9 +32,9 @@ database. Revocation and one-time use also need explicit state rules.
   `(user_id, created_at)` for owner metadata queries.
 - Rate-limit authenticated token operations, return raw credentials with
   `Cache-Control: no-store`, and log security events without raw values or hashes.
-- When issue #20 adds Agent registration, consume a token atomically in the same
-  transaction that creates Agent credentials. A read followed by an unguarded update
-  is not sufficient for the one-time guarantee.
+- Agent registration consumes the token through a conditional update in the same
+  PostgreSQL transaction that creates Agent credentials. A read followed by an
+  unguarded update is not sufficient for the one-time guarantee.
 
 ## Alternatives considered
 
@@ -46,7 +46,8 @@ database. Revocation and one-time use also need explicit state rules.
   cryptographic secret and does not communicate the required entropy.
 - Store token state only in an in-memory cache: rejected because PostgreSQL is the MVP
   source of truth and the state must survive restarts.
-- Implement Agent registration now: deferred to issue #20 to keep this change focused.
+- Implement Agent registration together with issue #19: rejected to keep token issuance
+  focused; issue #20 implements the consuming transaction described by this ADR.
 
 ## Consequences
 
@@ -58,8 +59,8 @@ database. Revocation and one-time use also need explicit state rules.
   authenticated user from growing the credential set without bound through the API.
 - Hash collisions are cryptographically improbable; creation still retries a bounded
   number of times if the database unique constraint reports one.
-- The definitive concurrent-consumption proof belongs to issue #20, where consumption
-  and Agent creation become one operation.
+- Concurrent consumption creates exactly one Agent; a failed Agent insert rolls back
+  the token update.
 
 ## Verification evidence
 
@@ -69,3 +70,5 @@ database. Revocation and one-time use also need explicit state rules.
   creation/revocation and used-token conflicts.
 - EF Core migration constraints and indexes enforce the persisted invariants and lookup
   paths described above.
+- Issue #20 integration tests execute simultaneous registration attempts and verify one
+  committed Agent plus one `used_at` timestamp.
