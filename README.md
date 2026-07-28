@@ -211,6 +211,7 @@ API
 - [`docs/api-conventions.md`](docs/api-conventions.md) — контракты API, валидация, Problem Details и correlation ID.
 - [`docs/adr/0001-user-password-and-jwt-authentication.md`](docs/adr/0001-user-password-and-jwt-authentication.md) — решение по password hashing и JWT.
 - [`docs/adr/0002-one-time-agent-installation-tokens.md`](docs/adr/0002-one-time-agent-installation-tokens.md) — решение по одноразовым installation tokens.
+- [`docs/adr/0003-agent-registration-and-opaque-credentials.md`](docs/adr/0003-agent-registration-and-opaque-credentials.md) — решение по атомарной регистрации и отдельным Agent credentials.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -302,13 +303,32 @@ $env:AgentInstallationTokens__LifetimeMinutes = "15"
 50 последних записей по умолчанию и принимает `limit` от 1 до 100 и `page` от 1 до
 1 000. Использованные, отозванные или просроченные метаданные старше 90 дней
 удаляются при следующем создании токена этого пользователя; срок настраивается через
-`AgentInstallationTokens__MetadataRetentionDays`. Фактическое использование токена
-при регистрации Agent относится к следующей задаче MVP.
+`AgentInstallationTokens__MetadataRetentionDays`.
+
+### Регистрация и аутентификация Agent
+
+Неаутентифицированный Agent регистрируется через `POST /api/agents/register`, передавая
+одноразовый installation token, имя, machine name, ОС и версию. API атомарно помечает
+token использованным и создаёт Agent: параллельные запросы с одним token не могут
+создать два Agent.
+
+Ответ возвращает отдельный credential только один раз. В PostgreSQL хранится только
+SHA-256 hash. Agent передаёт credential так:
+
+```http
+Authorization: Agent spac_<64 uppercase hex characters>
+```
+
+`GET /api/agents/me` проверяет Agent authentication и возвращает точный Agent ID.
+Пользователь может идемпотентно отозвать credentials собственного Agent через
+`DELETE /api/agents/{id}/credentials`; чужой ID возвращает `404`. После commit отзыва
+следующий Agent-запрос получает `401`. Credential не имеет автоматического срока
+действия в MVP, поэтому HTTPS и безопасное локальное хранение в issue #26 обязательны.
 
 Login/register ограничены десятью запросами в минуту на клиентский IP, а операции
 аутентифицированного пользователя — тридцатью запросами в минуту на `sub`. Значения
-настраиваются в секции `RateLimiting`. Ответы, содержащие JWT или исходный installation
-token, помечены `Cache-Control: no-store`.
+настраиваются в секции `RateLimiting`. Ответы, содержащие JWT, исходный installation
+token или Agent credential, помечены `Cache-Control: no-store`.
 
 ## Continuous integration
 
@@ -352,8 +372,8 @@ dotnet ef database update --project src/ServerPilot.Infrastructure --startup-pro
 
 ## Статус проекта
 
-Завершены foundation, PostgreSQL, API conventions, CI, пользовательская JWT-аутентификация
-и одноразовые Agent installation tokens. Следующая функциональная задача — #20,
-регистрация и отдельная аутентификация Agent.
+Завершены foundation, PostgreSQL, API conventions, CI, пользовательская JWT-аутентификация,
+одноразовые Agent installation tokens, регистрация и отдельная аутентификация Agent.
+Следующая функциональная задача — #21, heartbeat и пользовательские Agent queries.
 
 Текущая цель — реализовать минимальный рабочий вертикальный сценарий без преждевременного добавления сложной инфраструктуры.

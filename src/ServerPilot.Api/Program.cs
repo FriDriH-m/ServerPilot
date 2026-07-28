@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using ServerPilot.Api.Authentication;
 using ServerPilot.Api.Health;
 using ServerPilot.Api.Http;
+using ServerPilot.Application.Agents;
 using ServerPilot.Application.Authentication;
 using ServerPilot.Application.InstallationTokens;
 using ServerPilot.Infrastructure;
@@ -34,11 +35,15 @@ rateLimitOptions.Validate();
 
 builder.Services.AddInfrastructure(postgreSqlConnectionString, jwtSettings);
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<AgentRegistrationService>();
+builder.Services.AddScoped<AgentCredentialAuthenticationService>();
+builder.Services.AddScoped<AgentManagementService>();
 builder.Services.AddScoped<UserAuthenticationService>();
 builder.Services.AddSingleton(installationTokenOptions);
 builder.Services.AddScoped<AgentInstallationTokenService>();
 builder.Services.AddServerPilotRateLimiting(rateLimitOptions);
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICurrentAgent, HttpContextCurrentAgent>();
 builder.Services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails(options =>
@@ -50,7 +55,18 @@ builder.Services.AddProblemDetails(options =>
             context.HttpContext.TraceIdentifier;
     };
 });
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(
+        AgentAuthorizationPolicyNames.Agent,
+        policy =>
+        {
+            policy.AddAuthenticationSchemes(
+                AgentAuthenticationDefaults.AuthenticationScheme);
+            policy.RequireAuthenticatedUser();
+            policy.RequireClaim(AgentAuthenticationDefaults.AgentIdClaimType);
+        });
+});
 builder.Services.AddHealthChecks()
     .AddCheck<PostgreSqlReadinessHealthCheck>(
         "postgresql",

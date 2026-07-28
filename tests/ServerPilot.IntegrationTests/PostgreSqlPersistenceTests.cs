@@ -41,7 +41,7 @@ public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
         Assert.Contains(
             appliedMigrations,
             migration => migration.EndsWith(
-                "_HardenInstallationTokenConstraints",
+                "_AddAgentRegistrationAndAuthentication",
                 StringComparison.Ordinal));
         Assert.Empty(await dbContext.Database.GetPendingMigrationsAsync(CancellationToken.None));
     }
@@ -87,5 +87,47 @@ public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
         Assert.Equal(
             "ck_agent_installation_tokens_valid_token_hash",
             invalidHash.ConstraintName);
+    }
+
+    [Fact]
+    public async Task DatabaseRejectsInvalidAgentCredentialState()
+    {
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        ServerPilotDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+        DateTimeOffset registeredAt = DateTimeOffset.UtcNow;
+        User user = User.Create(
+            Guid.NewGuid(),
+            "agent-constraints@example.com",
+            "AGENT-CONSTRAINTS@EXAMPLE.COM",
+            "test-password-hash",
+            registeredAt);
+        dbContext.Users.Add(user);
+        await dbContext.SaveChangesAsync(CancellationToken.None);
+
+        PostgresException invalidHash = await Assert.ThrowsAsync<PostgresException>(() =>
+            dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO agents
+                    (id, user_id, name, machine_name, operating_system, agent_version,
+                     credential_hash, registered_at, credential_revoked_at)
+                VALUES
+                    ({Guid.NewGuid()}, {user.Id}, {"Agent"}, {"HOST"}, {"Windows"},
+                     {"1.0.0"}, {new string('A', 64)}, {registeredAt}, NULL)
+                """, CancellationToken.None));
+        Assert.Equal("ck_agents_valid_credential_hash", invalidHash.ConstraintName);
+
+        PostgresException invalidRevocation = await Assert.ThrowsAsync<PostgresException>(() =>
+            dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO agents
+                    (id, user_id, name, machine_name, operating_system, agent_version,
+                     credential_hash, registered_at, credential_revoked_at)
+                VALUES
+                    ({Guid.NewGuid()}, {user.Id}, {"Agent"}, {"HOST"}, {"Windows"},
+                     {"1.0.0"}, {new string('b', 64)}, {registeredAt},
+                     {registeredAt.AddTicks(-10)})
+                """, CancellationToken.None));
+        Assert.Equal(
+            "ck_agents_valid_credential_revoked_at",
+            invalidRevocation.ConstraintName);
     }
 }
