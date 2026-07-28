@@ -493,3 +493,27 @@ When Graphify data is available:
 - regenerate or update the graph after significant structural changes;
 - do not modify application architecture merely to improve the graph;
 - do not commit generated Graphify data unless the repository explicitly requires it.
+
+## Cross-cutting architecture check
+
+Before implementing or reviewing an issue, check GitHub issue #54.
+
+Determine whether the change:
+
+- introduces or changes a trust boundary;
+- changes authentication, credentials, authorization or resource ownership;
+- introduces a concurrency, atomicity or idempotency guarantee;
+- changes the local process-execution security boundary;
+- selects a persistence, messaging, caching or deployment strategy;
+- chooses between meaningful alternatives with long-term consequences.
+
+If none apply, state:
+
+`Cross-cutting #54: no update required.`
+
+If any apply, include the smallest relevant ADR, threat-model update or
+architecture fitness check in the active issue. Document the context,
+decision, alternatives, consequences and verification evidence.
+
+Do not create ADRs for routine implementation details and do not design
+post-MVP technologies before their implementation issue becomes active.
