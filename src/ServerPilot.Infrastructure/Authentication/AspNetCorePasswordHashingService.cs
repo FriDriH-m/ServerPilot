@@ -28,7 +28,10 @@ internal sealed class AspNetCorePasswordHashingService : IPasswordHashingService
         return passwordHasher.HashPassword(new PasswordHashSubject(userId), password);
     }
 
-    public bool VerifyPassword(Guid? userId, string? passwordHash, string providedPassword)
+    public PasswordVerificationOutcome VerifyPassword(
+        Guid? userId,
+        string? passwordHash,
+        string providedPassword)
     {
         ArgumentNullException.ThrowIfNull(providedPassword);
 
@@ -39,10 +42,14 @@ internal sealed class AspNetCorePasswordHashingService : IPasswordHashingService
             verificationHash,
             providedPassword);
 
-        return userId.HasValue &&
+        bool isValid = userId.HasValue &&
             passwordHash is not null &&
             result is PasswordVerificationResult.Success or
                 PasswordVerificationResult.SuccessRehashNeeded;
+
+        return new PasswordVerificationOutcome(
+            isValid,
+            isValid && result == PasswordVerificationResult.SuccessRehashNeeded);
     }
 
     private sealed record PasswordHashSubject(Guid UserId);

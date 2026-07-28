@@ -16,14 +16,22 @@ database. Revocation and one-time use also need explicit state rules.
   SHA-256 hash of the complete raw token; never log either value.
 - Default expiry to 15 minutes and allow operators to configure 1–1,440 minutes with
   `AgentInstallationTokens:LifetimeMinutes`.
+- Serialize creation per user with a PostgreSQL transaction advisory lock and cap the
+  number of unexpired active tokens. Paginate list queries with bounded page/limit
+  values and opportunistically remove inactive metadata past a configurable retention
+  period when that user creates another token.
 - Model `UsedAt` and `RevokedAt` as terminal states. Expired, revoked and already-used
   tokens cannot be used; used tokens cannot be revoked; repeating a revocation is
-  idempotent.
+  idempotent. Revocation uses one conditional PostgreSQL update so concurrent requests
+  cannot overwrite the winning timestamp.
 - Enforce owner-scoped list and revoke queries from the authenticated JWT subject.
   Return `404` for a missing or foreign token so the endpoint does not disclose its
   existence.
-- Enforce unique token hashes, valid lifetimes and mutually exclusive used/revoked
-  states in PostgreSQL. Index `(user_id, created_at)` for owner metadata queries.
+- Enforce canonical lowercase SHA-256 hashes, valid lifetimes, valid terminal-state
+  timestamps and mutually exclusive used/revoked states in PostgreSQL. Index
+  `(user_id, created_at)` for owner metadata queries.
+- Rate-limit authenticated token operations, return raw credentials with
+  `Cache-Control: no-store`, and log security events without raw values or hashes.
 - When issue #20 adds Agent registration, consume a token atomically in the same
   transaction that creates Agent credentials. A read followed by an unguarded update
   is not sufficient for the one-time guarantee.
@@ -46,6 +54,8 @@ database. Revocation and one-time use also need explicit state rules.
 - Anyone holding an active raw token can present it, so HTTPS and the short lifetime are
   required controls.
 - Revoked and used metadata remains available to its owner for lifecycle visibility.
+- Bounded active-token/list limits and inactive-metadata retention prevent a single
+  authenticated user from growing the credential set without bound through the API.
 - Hash collisions are cryptographically improbable; creation still retries a bounded
   number of times if the database unique constraint reports one.
 - The definitive concurrent-consumption proof belongs to issue #20, where consumption
@@ -55,6 +65,7 @@ database. Revocation and one-time use also need explicit state rules.
 
 - Domain tests cover expiry boundaries, single use, revocation and invalid transitions.
 - PostgreSQL integration tests verify authentication, hash-only persistence, one-time
-  raw-token disclosure, owner-scoped listing/revocation and used-token conflicts.
+  raw-token disclosure, owner-scoped bounded listing, active-token caps, concurrent
+  creation/revocation and used-token conflicts.
 - EF Core migration constraints and indexes enforce the persisted invariants and lookup
   paths described above.

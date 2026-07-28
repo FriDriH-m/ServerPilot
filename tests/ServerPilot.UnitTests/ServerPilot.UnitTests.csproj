@@ -14,5 +14,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/ServerPilot.Application/ServerPilot.Application.csproj" />
     <ProjectReference Include="../../src/ServerPilot.Domain/ServerPilot.Domain.csproj" />
+    <ProjectReference Include="../../src/ServerPilot.Infrastructure/ServerPilot.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

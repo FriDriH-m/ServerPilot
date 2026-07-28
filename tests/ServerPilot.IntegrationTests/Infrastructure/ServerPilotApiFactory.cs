@@ -7,7 +7,9 @@ using ServerPilot.Infrastructure.Persistence;
 
 namespace ServerPilot.IntegrationTests.Infrastructure;
 
-public sealed class ServerPilotApiFactory(string postgreSqlConnectionString)
+public sealed class ServerPilotApiFactory(
+    string postgreSqlConnectionString,
+    TestLogProvider? logProvider = null)
     : WebApplicationFactory<Program>
 {
     public const string JwtIssuer = "ServerPilot.IntegrationTests";
@@ -23,7 +25,14 @@ public sealed class ServerPilotApiFactory(string postgreSqlConnectionString)
         builder.UseSetting("Authentication:Jwt:SigningKey", JwtSigningKey);
         builder.UseSetting("Authentication:Jwt:AccessTokenLifetimeMinutes", "30");
         builder.UseSetting("AgentInstallationTokens:LifetimeMinutes", "15");
-        builder.ConfigureLogging(logging => logging.ClearProviders());
+        builder.ConfigureLogging(logging =>
+        {
+            logging.ClearProviders();
+            if (logProvider is not null)
+            {
+                logging.AddProvider(logProvider);
+            }
+        });
     }
 
     public async Task ResetDatabaseAsync(CancellationToken cancellationToken = default)
@@ -34,5 +43,13 @@ public sealed class ServerPilotApiFactory(string postgreSqlConnectionString)
 
         await dbContext.Database.EnsureDeletedAsync(cancellationToken);
         await dbContext.Database.MigrateAsync(cancellationToken);
+    }
+
+    public async Task DeleteDatabaseAsync(CancellationToken cancellationToken = default)
+    {
+        await using AsyncServiceScope scope = Services.CreateAsyncScope();
+        ServerPilotDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+        await dbContext.Database.EnsureDeletedAsync(cancellationToken);
     }
 }

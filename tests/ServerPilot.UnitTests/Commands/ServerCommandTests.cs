@@ -52,6 +52,35 @@ public sealed class ServerCommandTests
         Assert.Equal(1, command.AttemptCount);
     }
 
+    [Fact]
+    public void ConstructorRejectsUnsupportedCommandType()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ServerCommand(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            (ServerCommandType)999,
+            CreatedAt,
+            Guid.NewGuid()));
+    }
+
+    [Fact]
+    public void FailureDetailsHaveBoundedLengths()
+    {
+        ServerCommand command = CreateCommand(CreatedAt);
+        Assert.True(command.TryClaim(CreatedAt.AddSeconds(1)));
+        Assert.True(command.TryStart(CreatedAt.AddSeconds(2)));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => command.TryFail(
+            CreatedAt.AddSeconds(3),
+            new string('x', ServerCommand.MaximumErrorCodeLength + 1),
+            "message"));
+        Assert.Throws<ArgumentOutOfRangeException>(() => command.TryFail(
+            CreatedAt.AddSeconds(3),
+            "code",
+            new string('x', ServerCommand.MaximumErrorMessageLength + 1)));
+    }
+
     private static ServerCommand CreateCommand(DateTimeOffset createdAt)
     {
         return new ServerCommand(

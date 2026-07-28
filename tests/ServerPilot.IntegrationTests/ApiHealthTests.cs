@@ -26,10 +26,36 @@ public sealed class ApiHealthTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
-    public async Task HealthEndpointReturnsOk()
+    public async Task LivenessAndReadinessEndpointsReturnOkForCurrentDatabase()
     {
-        using HttpResponseMessage response = await client.GetAsync("/health", CancellationToken.None);
+        using HttpResponseMessage compatibilityResponse = await client.GetAsync(
+            "/health",
+            CancellationToken.None);
+        using HttpResponseMessage livenessResponse = await client.GetAsync(
+            "/health/live",
+            CancellationToken.None);
+        using HttpResponseMessage readinessResponse = await client.GetAsync(
+            "/health/ready",
+            CancellationToken.None);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, compatibilityResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, livenessResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, readinessResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task ReadinessFailsButLivenessSurvivesWhenDatabaseIsUnavailable()
+    {
+        await factory.DeleteDatabaseAsync(CancellationToken.None);
+
+        using HttpResponseMessage livenessResponse = await client.GetAsync(
+            "/health/live",
+            CancellationToken.None);
+        using HttpResponseMessage readinessResponse = await client.GetAsync(
+            "/health/ready",
+            CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.OK, livenessResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, readinessResponse.StatusCode);
     }
 }

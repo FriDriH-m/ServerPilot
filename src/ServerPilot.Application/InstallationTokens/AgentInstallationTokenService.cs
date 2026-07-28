@@ -10,7 +10,7 @@ public sealed class AgentInstallationTokenService(
 {
     private const int TokenGenerationAttempts = 3;
 
-    public async Task<CreatedAgentInstallationToken> CreateAsync(
+    public async Task<CreateAgentInstallationTokenResult> CreateAsync(
         Guid userId,
         CancellationToken cancellationToken)
     {
@@ -32,13 +32,29 @@ public sealed class AgentInstallationTokenService(
                 createdAt,
                 expiresAt);
 
-            if (await installationTokens.TryAddAsync(installationToken, cancellationToken))
+            AddAgentInstallationTokenStatus addStatus =
+                await installationTokens.TryAddAsync(
+                    installationToken,
+                    createdAt,
+                    createdAt.AddDays(-options.MetadataRetentionDays),
+                    options.MaximumActiveTokensPerUser,
+                    cancellationToken);
+            if (addStatus == AddAgentInstallationTokenStatus.Succeeded)
             {
-                return new CreatedAgentInstallationToken(
-                    installationToken.Id,
-                    generatedToken.RawToken,
-                    installationToken.CreatedAt,
-                    installationToken.ExpiresAt);
+                return new CreateAgentInstallationTokenResult(
+                    CreateAgentInstallationTokenStatus.Succeeded,
+                    new CreatedAgentInstallationToken(
+                        installationToken.Id,
+                        generatedToken.RawToken,
+                        installationToken.CreatedAt,
+                        installationToken.ExpiresAt));
+            }
+
+            if (addStatus == AddAgentInstallationTokenStatus.ActiveLimitReached)
+            {
+                return new CreateAgentInstallationTokenResult(
+                    CreateAgentInstallationTokenStatus.ActiveLimitReached,
+                    null);
             }
         }
 
@@ -48,6 +64,8 @@ public sealed class AgentInstallationTokenService(
 
     public async Task<IReadOnlyList<AgentInstallationTokenMetadata>> ListAsync(
         Guid userId,
+        int page,
+        int limit,
         CancellationToken cancellationToken)
     {
         if (userId == Guid.Empty)
@@ -55,8 +73,26 @@ public sealed class AgentInstallationTokenService(
             throw new ArgumentException("User ID cannot be empty.", nameof(userId));
         }
 
+        if (limit is < 1 or > 100)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(limit),
+                "Installation token list limit must be between 1 and 100.");
+        }
+
+        if (page is < 1 or > 1_000)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(page),
+                "Installation token list page must be between 1 and 1000.");
+        }
+
         IReadOnlyList<AgentInstallationToken> tokens =
-            await installationTokens.ListByUserIdAsync(userId, cancellationToken);
+            await installationTokens.ListByUserIdAsync(
+                userId,
+                (page - 1) * limit,
+                limit,
+                cancellationToken);
         DateTimeOffset now = timeProvider.GetUtcNow();
 
         return tokens
@@ -85,27 +121,10 @@ public sealed class AgentInstallationTokenService(
             throw new ArgumentException("User ID cannot be empty.", nameof(userId));
         }
 
-        AgentInstallationToken? token = await installationTokens.FindOwnedByIdAsync(
+        return await installationTokens.RevokeOwnedAsync(
             id,
             userId,
+            timeProvider.GetUtcNow(),
             cancellationToken);
-        if (token is null)
-        {
-            return RevokeAgentInstallationTokenStatus.NotFound;
-        }
-
-        AgentInstallationTokenRevocationResult result = token.TryRevoke(
-            timeProvider.GetUtcNow());
-        if (result == AgentInstallationTokenRevocationResult.AlreadyUsed)
-        {
-            return RevokeAgentInstallationTokenStatus.AlreadyUsed;
-        }
-
-        if (result == AgentInstallationTokenRevocationResult.Succeeded)
-        {
-            await installationTokens.SaveChangesAsync(cancellationToken);
-        }
-
-        return RevokeAgentInstallationTokenStatus.Succeeded;
     }
 }

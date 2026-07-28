@@ -33,7 +33,8 @@
 |---|---:|---|
 | Некорректный request contract | 400 | автоматическая валидация `[ApiController]` |
 | Не выполнена аутентификация | 401 | authentication middleware или `Unauthorized()` |
-| Недостаточно прав / ресурс принадлежит другому пользователю | 403 | authorization middleware или `Forbid()` |
+| Недостаточно прав | 403 | authorization middleware или `Forbid()` |
+| Ресурс отсутствует или его существование нельзя раскрывать чужому владельцу | 404 | owner-scoped query и `NotFound()` |
 | Ресурс не найден | 404 | `NotFound()` |
 | Конфликт с текущим состоянием | 409 | `Conflict()` |
 | Неожиданная ошибка | 500 | exception handling middleware |

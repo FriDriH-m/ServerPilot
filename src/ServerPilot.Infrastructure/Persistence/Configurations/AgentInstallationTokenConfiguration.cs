@@ -16,6 +16,12 @@ internal sealed class AgentInstallationTokenConfiguration
         "ck_agent_installation_tokens_valid_lifetime";
     internal const string SingleTerminalStateConstraintName =
         "ck_agent_installation_tokens_single_terminal_state";
+    internal const string ValidUsedAtConstraintName =
+        "ck_agent_installation_tokens_valid_used_at";
+    internal const string ValidRevokedAtConstraintName =
+        "ck_agent_installation_tokens_valid_revoked_at";
+    internal const string ValidTokenHashConstraintName =
+        "ck_agent_installation_tokens_valid_token_hash";
 
     public void Configure(EntityTypeBuilder<AgentInstallationToken> builder)
     {
@@ -29,6 +35,15 @@ internal sealed class AgentInstallationTokenConfiguration
                 tableBuilder.HasCheckConstraint(
                     SingleTerminalStateConstraintName,
                     "used_at IS NULL OR revoked_at IS NULL");
+                tableBuilder.HasCheckConstraint(
+                    ValidUsedAtConstraintName,
+                    "used_at IS NULL OR (used_at >= created_at AND used_at < expires_at)");
+                tableBuilder.HasCheckConstraint(
+                    ValidRevokedAtConstraintName,
+                    "revoked_at IS NULL OR revoked_at >= created_at");
+                tableBuilder.HasCheckConstraint(
+                    ValidTokenHashConstraintName,
+                    "token_hash ~ '^[0-9a-f]{64}$'");
             });
         builder.HasKey(token => token.Id).HasName("pk_agent_installation_tokens");
 

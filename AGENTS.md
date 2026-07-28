@@ -358,6 +358,38 @@ Before implementation:
 
 For a simple and explicit task, a brief plan is sufficient.
 
+## Issue execution gate
+
+Before starting every issue:
+
+1. Read the active issue and GitHub issue #54.
+2. Run `git fetch --prune` and verify the previous PR state.
+3. Switch to `main`, run `git pull --ff-only` and require a clean worktree.
+4. Create the task branch from the current `origin/main`.
+5. Verify issue dependencies and reconcile the roadmap's current-state section.
+6. State the Cross-cutting #54 result before implementation.
+
+Before committing or opening a pull request:
+
+1. Run `./eng/verify.ps1`.
+2. Inspect `git status`, `git diff --stat origin/main...HEAD` and
+   `git diff origin/main...HEAD`.
+3. Recheck ownership, authorization, concurrency, idempotency and secret handling.
+4. Update tests, documentation, ADR/threat model and roadmap when applicable.
+5. Verify that no unrelated files are included.
+
+After a pull request is merged:
+
+1. Confirm the implementation issue is closed.
+2. Update the roadmap's current-state and recommended-next-step sections.
+3. Fetch and fast-forward local `main`.
+4. Do not start the next issue from the merged feature branch.
+
+After every three to five completed implementation issues, perform a read-only
+milestone audit covering documentation drift, security boundaries, ownership,
+concurrency, migrations, CI and roadmap state. Record actionable findings as focused
+issues instead of silently expanding the next implementation task.
+
 ## Workflow during implementation
 
 - Implement only the requested scope.
