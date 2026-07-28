@@ -209,11 +209,14 @@ API
 - [`docs/product.md`](docs/product.md) — полное описание проекта и целевой архитектуры.
 - [`docs/mvp.md`](docs/mvp.md) — границы первой версии.
 - [`docs/api-conventions.md`](docs/api-conventions.md) — контракты API, валидация, Problem Details и correlation ID.
+- [`docs/adr/0001-user-password-and-jwt-authentication.md`](docs/adr/0001-user-password-and-jwt-authentication.md) — решение по password hashing и JWT.
+- [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
 ## Запуск инфраструктуры
 
-Создайте локальный файл окружения и задайте пароль PostgreSQL:
+Создайте локальный файл окружения, задайте пароль PostgreSQL и замените
+`JWT_SIGNING_KEY` случайным значением длиной не менее 32 байт:
 
 ```powershell
 Copy-Item .env.example .env
@@ -242,6 +245,23 @@ dotnet test
 ```bash
 dotnet format --verify-no-changes
 ```
+
+### Аутентификация пользователя
+
+API предоставляет `POST /api/auth/register`, `POST /api/auth/login` и защищённый
+`GET /api/auth/me`. Регистрация и login возвращают JWT access token сроком на 30 минут.
+Передавайте его в заголовке `Authorization: Bearer <token>`.
+
+Signing key не хранится в `appsettings.json`. Для локального запуска без Compose
+задайте его через environment variable:
+
+```powershell
+$env:Authentication__Jwt__SigningKey = "<at-least-32-random-bytes>"
+```
+
+Email хранится в исходном trimmed-виде и отдельно нормализуется для уникального
+сравнения. Пароли сохраняются только как ASP.NET Core Identity hash. Refresh tokens,
+password reset, email confirmation и роли не входят в текущий MVP.
 
 ## Continuous integration
 

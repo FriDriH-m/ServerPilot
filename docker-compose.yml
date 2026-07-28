@@ -22,6 +22,7 @@ services:
     environment:
       ASPNETCORE_HTTP_PORTS: 8080
       ConnectionStrings__PostgreSql: Host=postgres;Port=5432;Database=serverpilot;Username=serverpilot;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      Authentication__Jwt__SigningKey: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
     ports:
       - "8080:8080"
     depends_on:
