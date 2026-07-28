@@ -6,6 +6,7 @@ using ServerPilot.Api.Http;
 using ServerPilot.Application.Agents;
 using ServerPilot.Application.Authentication;
 using ServerPilot.Application.InstallationTokens;
+using ServerPilot.Application.ServerInstances;
 using ServerPilot.Infrastructure;
 using ServerPilot.Infrastructure.Authentication;
 
@@ -45,6 +46,7 @@ builder.Services.AddScoped<AgentCredentialAuthenticationService>();
 builder.Services.AddScoped<AgentHeartbeatService>();
 builder.Services.AddScoped<AgentQueryService>();
 builder.Services.AddScoped<AgentManagementService>();
+builder.Services.AddScoped<ServerInstanceService>();
 builder.Services.AddScoped<UserAuthenticationService>();
 builder.Services.AddSingleton(installationTokenOptions);
 builder.Services.AddSingleton(agentAvailabilityOptions);

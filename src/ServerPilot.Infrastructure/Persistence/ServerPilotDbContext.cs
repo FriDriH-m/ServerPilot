@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ServerPilot.Domain.Agents;
 using ServerPilot.Domain.InstallationTokens;
+using ServerPilot.Domain.ServerInstances;
 using ServerPilot.Domain.Users;
 
 namespace ServerPilot.Infrastructure.Persistence;
@@ -14,6 +15,8 @@ public sealed class ServerPilotDbContext(DbContextOptions<ServerPilotDbContext> 
         Set<AgentInstallationToken>();
 
     public DbSet<Agent> Agents => Set<Agent>();
+
+    public DbSet<ServerInstance> ServerInstances => Set<ServerInstance>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

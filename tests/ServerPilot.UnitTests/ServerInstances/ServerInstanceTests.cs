@@ -1,0 +1,119 @@
+using ServerPilot.Domain.ServerInstances;
+
+namespace ServerPilot.UnitTests.ServerInstances;
+
+public sealed class ServerInstanceTests
+{
+    private static readonly DateTimeOffset CreatedAt =
+        new(2026, 7, 29, 12, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void ConfigurationTrimsValuesAndRequiresAbsoluteWindowsPaths()
+    {
+        bool created = ServerInstanceConfiguration.TryCreate(
+            "  Project Zomboid  ",
+            "  C:\\Servers\\zomboid\\start-server.bat  ",
+            "  -servername test  ",
+            "  \\\\host\\servers\\zomboid  ",
+            "  ProjectZomboid64.exe  ",
+            out ServerInstanceConfiguration? configuration);
+
+        Assert.True(created);
+        ServerInstanceConfiguration value = Assert.IsType<ServerInstanceConfiguration>(configuration);
+        Assert.Equal("Project Zomboid", value.Name);
+        Assert.Equal("C:\\Servers\\zomboid\\start-server.bat", value.ExecutablePath);
+        Assert.Equal("-servername test", value.Arguments);
+        Assert.Equal("\\\\host\\servers\\zomboid", value.WorkingDirectory);
+        Assert.Equal("ProjectZomboid64.exe", value.ProcessName);
+    }
+
+    [Theory]
+    [InlineData("server.exe", "C:\\Servers", "server.exe")]
+    [InlineData("C:\\Servers\\server.exe", "servers", "server.exe")]
+    [InlineData("C:\\Servers\\server.exe", "C:\\Servers", "C:\\Servers\\server.exe")]
+    [InlineData("\\\\?\\C:\\Servers\\server.exe", "C:\\Servers", "server.exe")]
+    [InlineData("C:\\Servers\\..\\server.exe", "C:\\Servers", "server.exe")]
+    public void ConfigurationRejectsUnsafeOrRelativePaths(
+        string executablePath,
+        string workingDirectory,
+        string processName)
+    {
+        bool created = ServerInstanceConfiguration.TryCreate(
+            "Server",
+            executablePath,
+            string.Empty,
+            workingDirectory,
+            processName,
+            out ServerInstanceConfiguration? configuration);
+
+        Assert.False(created);
+        Assert.Null(configuration);
+    }
+
+    [Fact]
+    public void CreateAndUpdatePreserveStateInvariants()
+    {
+        ServerInstance instance = ServerInstance.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            CreateConfiguration("First"),
+            CreatedAt);
+        DateTimeOffset updatedAt = CreatedAt.AddMinutes(1);
+
+        instance.UpdateConfiguration(CreateConfiguration("Updated"), updatedAt);
+        instance.RecordProcessState(
+            ServerInstanceStatus.Running,
+            42,
+            updatedAt.AddSeconds(1));
+
+        Assert.Equal("Updated", instance.Name);
+        Assert.Equal(ServerInstanceStatus.Running, instance.Status);
+        Assert.Equal(42, instance.LastProcessId);
+        Assert.True(instance.IsActive);
+        Assert.Equal(updatedAt.AddSeconds(1), instance.UpdatedAt);
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            instance.UpdateConfiguration(CreateConfiguration("Stale"), CreatedAt));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            instance.RecordProcessState(
+                ServerInstanceStatus.Stopped,
+                0,
+                updatedAt.AddSeconds(2)));
+    }
+
+    [Fact]
+    public void StoppedInstanceIsNotActiveAndCanClearTrackedProcessId()
+    {
+        ServerInstance instance = ServerInstance.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            CreateConfiguration("Server"),
+            CreatedAt);
+
+        instance.RecordProcessState(
+            ServerInstanceStatus.Running,
+            42,
+            CreatedAt.AddMinutes(1));
+        instance.RecordProcessState(
+            ServerInstanceStatus.Stopped,
+            null,
+            CreatedAt.AddMinutes(2));
+
+        Assert.False(instance.IsActive);
+        Assert.Null(instance.LastProcessId);
+        Assert.Equal(ServerInstanceStatus.Stopped, instance.Status);
+    }
+
+    private static ServerInstanceConfiguration CreateConfiguration(string name)
+    {
+        bool created = ServerInstanceConfiguration.TryCreate(
+            name,
+            "C:\\Servers\\server.exe",
+            string.Empty,
+            "C:\\Servers",
+            "server.exe",
+            out ServerInstanceConfiguration? configuration);
+
+        Assert.True(created);
+        return Assert.IsType<ServerInstanceConfiguration>(configuration);
+    }
+}
