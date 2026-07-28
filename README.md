@@ -243,6 +243,27 @@ dotnet test
 dotnet format --verify-no-changes
 ```
 
+## Continuous integration
+
+Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) запускается для каждого pull request в `main` и каждого push в `main`.
+
+CI использует те же команды, которые можно выполнить локально:
+
+```bash
+docker info
+dotnet restore ServerPilot.slnx
+dotnet build ServerPilot.slnx --configuration Release --no-restore
+dotnet format ServerPilot.slnx --verify-no-changes --no-restore
+dotnet test tests/ServerPilot.UnitTests/ServerPilot.UnitTests.csproj --configuration Release --no-build --no-restore --logger "trx;LogFileName=unit-tests.trx" --results-directory artifacts/test-results/unit
+dotnet test tests/ServerPilot.IntegrationTests/ServerPilot.IntegrationTests.csproj --configuration Release --no-build --no-restore --logger "trx;LogFileName=integration-tests.trx" --results-directory artifacts/test-results/integration
+```
+
+Integration-тесты используют Testcontainers и создают временный PostgreSQL-контейнер из образа `postgres:18.4-alpine`. На GitHub-hosted Ubuntu runner Docker уже доступен, поэтому отдельный PostgreSQL service container и credentials в workflow не нужны. Для локального запуска integration-тестов должен работать Docker Desktop или другой совместимый Docker daemon.
+
+NuGet Audit явно включён для прямых и транзитивных зависимостей. Поскольку warnings считаются errors, найденная уязвимость завершает restore с ошибкой и остаётся видимой в логе job. При падении тестов CI сохраняет TRX-файлы как artifact на семь дней.
+
+Кеш NuGet намеренно не настроен: его следует добавлять только после измерения времени restore. Сборка Docker-образа будет добавлена после завершения #32.
+
 ### Применение миграций PostgreSQL
 
 Перед локальным применением миграций задайте строку подключения через переменную окружения, не сохраняя пароль в репозитории:
