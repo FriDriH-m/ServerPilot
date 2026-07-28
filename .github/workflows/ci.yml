@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build, format and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+      DOTNET_NOLOGO: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Verify Docker availability
+        run: docker info
+
+      - name: Restore and audit dependencies
+        run: dotnet restore ServerPilot.slnx
+
+      - name: Build in Release mode
+        run: dotnet build ServerPilot.slnx --configuration Release --no-restore
+
+      - name: Verify formatting and analyzers
+        run: dotnet format ServerPilot.slnx --verify-no-changes --no-restore
+
+      - name: Run unit tests
+        run: >-
+          dotnet test tests/ServerPilot.UnitTests/ServerPilot.UnitTests.csproj
+          --configuration Release
+          --no-build
+          --no-restore
+          --logger "trx;LogFileName=unit-tests.trx"
+          --results-directory artifacts/test-results/unit
+
+      - name: Run PostgreSQL integration tests
+        run: >-
+          dotnet test tests/ServerPilot.IntegrationTests/ServerPilot.IntegrationTests.csproj
+          --configuration Release
+          --no-build
+          --no-restore
+          --logger "trx;LogFileName=integration-tests.trx"
+          --results-directory artifacts/test-results/integration
+
+      - name: Upload test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/test-results
+          if-no-files-found: ignore
+          retention-days: 7
