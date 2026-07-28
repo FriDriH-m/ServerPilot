@@ -14,16 +14,18 @@ namespace ServerPilot.IntegrationTests;
 public sealed class AgentHeartbeatTests : IAsyncLifetime, IDisposable
 {
     private const string Password = "correct horse battery staple";
-    private static readonly DateTimeOffset InitialTime =
-        new(2026, 7, 28, 21, 0, 0, TimeSpan.Zero);
 
-    private readonly MutableTimeProvider timeProvider = new(InitialTime);
+    private readonly DateTimeOffset initialTime;
+    private readonly MutableTimeProvider timeProvider;
     private readonly TestLogProvider logProvider = new();
     private readonly ServerPilotApiFactory factory;
     private readonly HttpClient client;
 
     public AgentHeartbeatTests(PostgreSqlDatabaseFixture database)
     {
+        DateTimeOffset utcNow = TimeProvider.System.GetUtcNow();
+        initialTime = utcNow.AddTicks(-(utcNow.Ticks % 10));
+        timeProvider = new MutableTimeProvider(initialTime);
         factory = new ServerPilotApiFactory(
             database.ConnectionString,
             logProvider,
@@ -87,7 +89,7 @@ public sealed class AgentHeartbeatTests : IAsyncLifetime, IDisposable
             .Select(agent => agent.LastSeenAt)
             .SingleAsync(CancellationToken.None);
 
-        Assert.Equal(InitialTime, firstLastSeen);
+        Assert.Equal(initialTime, firstLastSeen);
         Assert.Null(secondLastSeen);
         Assert.Contains(logProvider.Entries, entry =>
             entry.Message.Contains(firstAgent.AgentId.ToString(), StringComparison.Ordinal) &&
@@ -172,12 +174,12 @@ public sealed class AgentHeartbeatTests : IAsyncLifetime, IDisposable
         AuthorizeUser(owner.AccessToken);
         AgentResponse atBoundary = await GetAgentAsync(agent.AgentId);
         Assert.Equal("Online", atBoundary.Status);
-        Assert.Equal(InitialTime, atBoundary.LastSeenAt);
+        Assert.Equal(initialTime, atBoundary.LastSeenAt);
 
         timeProvider.Advance(TimeSpan.FromTicks(1));
         AgentResponse beyondBoundary = await GetAgentAsync(agent.AgentId);
         Assert.Equal("Offline", beyondBoundary.Status);
-        Assert.Equal(InitialTime, beyondBoundary.LastSeenAt);
+        Assert.Equal(initialTime, beyondBoundary.LastSeenAt);
     }
 
     [Fact]
@@ -185,8 +187,8 @@ public sealed class AgentHeartbeatTests : IAsyncLifetime, IDisposable
     {
         AuthenticationResponse owner = await RegisterUserAsync("heartbeat-race@example.com");
         RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "Race Agent");
-        DateTimeOffset olderHeartbeat = InitialTime.AddSeconds(10);
-        DateTimeOffset newerHeartbeat = InitialTime.AddSeconds(20);
+        DateTimeOffset olderHeartbeat = initialTime.AddSeconds(10);
+        DateTimeOffset newerHeartbeat = initialTime.AddSeconds(20);
 
         await using AsyncServiceScope firstScope = factory.Services.CreateAsyncScope();
         await using AsyncServiceScope secondScope = factory.Services.CreateAsyncScope();
