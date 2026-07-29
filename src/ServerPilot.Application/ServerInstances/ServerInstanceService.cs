@@ -65,7 +65,7 @@ public sealed class ServerInstanceService(
         return serverInstances.FindOwnedAsync(id, userId, cancellationToken);
     }
 
-    public Task<ServerInstanceDetails?> UpdateAsync(
+    public Task<UpdateServerInstanceResult> UpdateAsync(
         Guid id,
         Guid userId,
         ServerInstanceConfiguration configuration,
@@ -73,7 +73,9 @@ public sealed class ServerInstanceService(
     {
         if (id == Guid.Empty)
         {
-            return Task.FromResult<ServerInstanceDetails?>(null);
+            return Task.FromResult(new UpdateServerInstanceResult(
+                UpdateServerInstanceStatus.NotFound,
+                null));
         }
 
         ValidateUserId(userId);

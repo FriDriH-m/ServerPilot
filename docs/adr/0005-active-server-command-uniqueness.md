@@ -18,6 +18,9 @@ that no active command exists.
 - Translate only a unique-constraint violation from that named index into the expected
   `409 Conflict`; other database failures continue through normal error handling.
 - Order command history by `created_at DESC, id DESC`, matching the supporting index.
+- Continue command history with an opaque keyset cursor containing that pair. Fetch one
+  extra row to determine `nextCursor`; reject malformed cursors and the obsolete `page`
+  parameter with `400`.
 
 ## Alternatives considered
 
@@ -43,4 +46,5 @@ that no active command exists.
 - PostgreSQL integration tests issue concurrent Start and Stop requests and verify
   exactly one persisted pending command.
 - API integration tests cover owner scoping, foreign-resource `404`, conflict handling,
-  newest-first pagination and omission of raw failure messages from history responses.
+  stable newest-first cursor pagination (including equal timestamps and intervening
+  inserts) and omission of raw failure messages from history responses.

@@ -374,9 +374,11 @@ POST /api/commands/{commandId}/fail
 ```
 
 `claim-next` доступен только Agent credential, чей Agent ID точно совпадает с маршрутом.
-Он одним коротким PostgreSQL statement выбирает старейшую `Pending`-команду и переводит
-её в `Claimed`; параллельные запросы не могут получить один command ID. Пустая очередь
-возвращает `204`.
+Он блокирует строку Agent на время короткого PostgreSQL statement. Уже назначенная этому
+Agent команда в `Claimed` или `Running` выдаётся повторно как `Recovery`; только при её
+отсутствии старейшая `Pending`-команда переводится в `Claimed` и выдаётся как `New`.
+Частичный уникальный индекс запрещает несколько одновременно `Claimed`/`Running`
+команд одного Agent. Пустая очередь возвращает `204`.
 
 Переходы результата также авторизуются по Agent ID команды: `Claimed -> Running`,
 `Running -> Completed` и `Running -> Failed`. Повтор уже применённого progress/result

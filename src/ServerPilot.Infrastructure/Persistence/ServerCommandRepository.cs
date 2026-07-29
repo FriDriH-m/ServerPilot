@@ -1,6 +1,7 @@
 using System.Data;
 using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
 using ServerPilot.Application.Commands;
 using ServerPilot.Domain.Commands;
@@ -12,36 +13,102 @@ namespace ServerPilot.Infrastructure.Persistence;
 internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
     : IServerCommandRepository
 {
-    public async Task<ServerCommandDetails?> ClaimNextAsync(
+    public async Task<ClaimedServerCommandDetails?> ClaimNextAsync(
         Guid agentId,
         DateTimeOffset claimedAt,
         CancellationToken cancellationToken)
     {
         const string sql =
             """
-            WITH next_command AS
+            WITH agent_lock AS MATERIALIZED
             (
                 SELECT id
-                FROM server_commands
-                WHERE agent_id = @agent_id AND status = @pending_status
-                ORDER BY created_at, id
-                FOR UPDATE SKIP LOCKED
+                FROM agents
+                WHERE id = @agent_id
+                FOR UPDATE
+            ),
+            active_command AS MATERIALIZED
+            (
+                SELECT command.id,
+                       command.agent_id,
+                       command.server_instance_id,
+                       command.type,
+                       command.status,
+                       command.created_at,
+                       command.claimed_at,
+                       command.started_at,
+                       command.completed_at,
+                       command.error_code,
+                       command.attempt_count,
+                       command.correlation_id
+                FROM server_commands AS command
+                INNER JOIN agent_lock ON agent_lock.id = command.agent_id
+                WHERE command.status IN (@claimed_status, @running_status)
+                ORDER BY command.claimed_at, command.id
                 LIMIT 1
+            ),
+            next_command AS
+            (
+                SELECT command.id
+                FROM server_commands AS command
+                INNER JOIN agent_lock ON agent_lock.id = command.agent_id
+                WHERE command.status = @pending_status
+                  AND NOT EXISTS (SELECT 1 FROM active_command)
+                ORDER BY command.created_at, command.id
+                FOR UPDATE OF command SKIP LOCKED
+                LIMIT 1
+            ),
+            claimed_command AS
+            (
+                UPDATE server_commands AS command
+                SET status = @claimed_status,
+                    claimed_at = GREATEST(@claimed_at, command.created_at),
+                    attempt_count = command.attempt_count + 1
+                FROM next_command
+                WHERE command.id = next_command.id
+                RETURNING command.id,
+                          command.agent_id,
+                          command.server_instance_id,
+                          command.type,
+                          command.status,
+                          command.created_at,
+                          command.claimed_at,
+                          command.started_at,
+                          command.completed_at,
+                          command.error_code,
+                          command.attempt_count,
+                          command.correlation_id
             )
-            UPDATE server_commands AS command
-            SET status = @claimed_status,
-                claimed_at = @claimed_at,
-                attempt_count = command.attempt_count + 1
-            FROM next_command
-            WHERE command.id = next_command.id
-            RETURNING command.id,
-                      command.agent_id,
-                      command.server_instance_id,
-                      command.type,
-                      command.created_at,
-                      command.claimed_at,
-                      command.attempt_count,
-                      command.correlation_id
+            SELECT active_command.id,
+                   active_command.agent_id,
+                   active_command.server_instance_id,
+                   active_command.type,
+                   active_command.status,
+                   active_command.created_at,
+                   active_command.claimed_at,
+                   active_command.started_at,
+                   active_command.completed_at,
+                   active_command.error_code,
+                   active_command.attempt_count,
+                   active_command.correlation_id,
+                   TRUE AS is_recovery
+            FROM active_command
+            UNION ALL
+            SELECT claimed_command.id,
+                   claimed_command.agent_id,
+                   claimed_command.server_instance_id,
+                   claimed_command.type,
+                   claimed_command.status,
+                   claimed_command.created_at,
+                   claimed_command.claimed_at,
+                   claimed_command.started_at,
+                   claimed_command.completed_at,
+                   claimed_command.error_code,
+                   claimed_command.attempt_count,
+                   claimed_command.correlation_id,
+                   FALSE AS is_recovery
+            FROM claimed_command
+            LIMIT 1
             """;
 
         DbConnection connection = dbContext.Database.GetDbConnection();
@@ -53,44 +120,26 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
 
         try
         {
-            await using DbCommand command = connection.CreateCommand();
-            command.CommandText = sql;
-            AddParameter(command, "agent_id", DbType.Guid, agentId);
-            AddParameter(
-                command,
-                "pending_status",
-                DbType.Int32,
-                (int)ServerCommandStatus.Pending);
-            AddParameter(
-                command,
-                "claimed_status",
-                DbType.Int32,
-                (int)ServerCommandStatus.Claimed);
-            AddParameter(
-                command,
-                "claimed_at",
-                DbType.DateTimeOffset,
-                claimedAt.ToUniversalTime());
-
-            await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken))
+            for (int attempt = 0; attempt < 2; attempt++)
             {
-                return null;
+                try
+                {
+                    return await ExecuteClaimAsync(
+                        connection,
+                        sql,
+                        agentId,
+                        claimedAt,
+                        cancellationToken);
+                }
+                catch (PostgresException exception) when (
+                    attempt == 0 && IsActiveAgentCommandConflict(exception))
+                {
+                    // A direct concurrent database writer may bypass the Agent row lock.
+                    // Retry once so the named database invariant becomes a recovery read.
+                }
             }
 
-            return new ServerCommandDetails(
-                reader.GetGuid(0),
-                reader.GetGuid(1),
-                reader.GetGuid(2),
-                (ServerCommandType)reader.GetInt32(3),
-                ServerCommandStatus.Claimed,
-                GetUtcTimestamp(reader, 4),
-                GetUtcTimestamp(reader, 5),
-                null,
-                null,
-                null,
-                reader.GetInt32(6),
-                reader.GetGuid(7));
+            throw new InvalidOperationException("Command claim retry did not produce a result.");
         }
         finally
         {
@@ -101,21 +150,68 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
         }
     }
 
+    private static async Task<ClaimedServerCommandDetails?> ExecuteClaimAsync(
+        DbConnection connection,
+        string sql,
+        Guid agentId,
+        DateTimeOffset claimedAt,
+        CancellationToken cancellationToken)
+    {
+        await using DbCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        AddParameter(command, "agent_id", DbType.Guid, agentId);
+        AddParameter(command, "pending_status", DbType.Int32, (int)ServerCommandStatus.Pending);
+        AddParameter(command, "claimed_status", DbType.Int32, (int)ServerCommandStatus.Claimed);
+        AddParameter(command, "running_status", DbType.Int32, (int)ServerCommandStatus.Running);
+        AddParameter(
+            command,
+            "claimed_at",
+            DbType.DateTimeOffset,
+            claimedAt.ToUniversalTime());
+
+        await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        ServerCommandDetails details = new(
+            reader.GetGuid(0),
+            reader.GetGuid(1),
+            reader.GetGuid(2),
+            (ServerCommandType)reader.GetInt32(3),
+            (ServerCommandStatus)reader.GetInt32(4),
+            GetUtcTimestamp(reader, 5),
+            GetNullableUtcTimestamp(reader, 6),
+            GetNullableUtcTimestamp(reader, 7),
+            GetNullableUtcTimestamp(reader, 8),
+            reader.IsDBNull(9) ? null : reader.GetString(9),
+            reader.GetInt32(10),
+            reader.GetGuid(11));
+        AgentCommandDeliveryKind deliveryKind = reader.GetBoolean(12)
+            ? AgentCommandDeliveryKind.Recovery
+            : AgentCommandDeliveryKind.New;
+        return new ClaimedServerCommandDetails(details, deliveryKind);
+    }
+
     public async Task<AgentCommandTransitionStatus> StartAsync(
         Guid commandId,
         Guid agentId,
         DateTimeOffset startedAt,
         CancellationToken cancellationToken)
     {
+        DateTimeOffset utcStartedAt = startedAt.ToUniversalTime();
         int updated = await dbContext.ServerCommands
             .Where(command =>
                 command.Id == commandId &&
                 command.AgentId == agentId &&
-                command.Status == ServerCommandStatus.Claimed)
+                command.Status == ServerCommandStatus.Claimed &&
+                command.ClaimedAt != null &&
+                command.ClaimedAt <= utcStartedAt)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(command => command.Status, ServerCommandStatus.Running)
-                    .SetProperty(command => command.StartedAt, startedAt.ToUniversalTime()),
+                    .SetProperty(command => command.StartedAt, utcStartedAt),
                 cancellationToken);
         if (updated == 1)
         {
@@ -142,15 +238,18 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
         DateTimeOffset completedAt,
         CancellationToken cancellationToken)
     {
+        DateTimeOffset utcCompletedAt = completedAt.ToUniversalTime();
         int updated = await dbContext.ServerCommands
             .Where(command =>
                 command.Id == commandId &&
                 command.AgentId == agentId &&
-                command.Status == ServerCommandStatus.Running)
+                command.Status == ServerCommandStatus.Running &&
+                command.StartedAt != null &&
+                command.StartedAt <= utcCompletedAt)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(command => command.Status, ServerCommandStatus.Completed)
-                    .SetProperty(command => command.CompletedAt, completedAt.ToUniversalTime()),
+                    .SetProperty(command => command.CompletedAt, utcCompletedAt),
                 cancellationToken);
         if (updated == 1)
         {
@@ -179,15 +278,18 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
         string errorMessage,
         CancellationToken cancellationToken)
     {
+        DateTimeOffset utcCompletedAt = completedAt.ToUniversalTime();
         int updated = await dbContext.ServerCommands
             .Where(command =>
                 command.Id == commandId &&
                 command.AgentId == agentId &&
-                command.Status == ServerCommandStatus.Running)
+                command.Status == ServerCommandStatus.Running &&
+                command.StartedAt != null &&
+                command.StartedAt <= utcCompletedAt)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(command => command.Status, ServerCommandStatus.Failed)
-                    .SetProperty(command => command.CompletedAt, completedAt.ToUniversalTime())
+                    .SetProperty(command => command.CompletedAt, utcCompletedAt)
                     .SetProperty(command => command.ErrorCode, errorCode)
                     .SetProperty(command => command.ErrorMessage, errorMessage),
                 cancellationToken);
@@ -220,11 +322,12 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
         Guid correlationId,
         CancellationToken cancellationToken)
     {
-        Guid? agentId = await OwnedByUser(userId)
-            .AsNoTracking()
-            .Where(serverInstance => serverInstance.Id == serverInstanceId)
-            .Select(serverInstance => (Guid?)serverInstance.AgentId)
-            .SingleOrDefaultAsync(cancellationToken);
+        await using IDbContextTransaction transaction =
+            await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        Guid? agentId = await LockOwnedServerInstanceAsync(
+            serverInstanceId,
+            userId,
+            cancellationToken);
         if (agentId is null)
         {
             return new CreateServerCommandResult(
@@ -260,6 +363,8 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
                 null);
         }
 
+        await transaction.CommitAsync(cancellationToken);
+
         return new CreateServerCommandResult(
             CreateServerCommandStatus.Succeeded,
             MapDetails(command));
@@ -268,7 +373,7 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
     public async Task<ServerCommandHistoryResult> ListOwnedAsync(
         Guid serverInstanceId,
         Guid userId,
-        int skip,
+        ServerCommandHistoryCursor? after,
         int limit,
         CancellationToken cancellationToken)
     {
@@ -277,16 +382,23 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
             .AnyAsync(serverInstance => serverInstance.Id == serverInstanceId, cancellationToken);
         if (!serverInstanceFound)
         {
-            return new ServerCommandHistoryResult(false, []);
+            return new ServerCommandHistoryResult(false, [], false);
         }
 
-        ServerCommandDetails[] commands = await dbContext.ServerCommands
+        IQueryable<ServerCommand> query = dbContext.ServerCommands
             .AsNoTracking()
-            .Where(command => command.ServerInstanceId == serverInstanceId)
+            .Where(command => command.ServerInstanceId == serverInstanceId);
+        if (after is not null)
+        {
+            query = query.Where(command =>
+                command.CreatedAt < after.CreatedAt ||
+                (command.CreatedAt == after.CreatedAt && command.Id.CompareTo(after.Id) < 0));
+        }
+
+        ServerCommandDetails[] commands = await query
             .OrderByDescending(command => command.CreatedAt)
             .ThenByDescending(command => command.Id)
-            .Skip(skip)
-            .Take(limit)
+            .Take(limit + 1)
             .Select(command => new ServerCommandDetails(
                 command.Id,
                 command.AgentId,
@@ -302,13 +414,39 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
                 command.CorrelationId))
             .ToArrayAsync(cancellationToken);
 
-        return new ServerCommandHistoryResult(true, commands);
+        bool hasMore = commands.Length > limit;
+        return new ServerCommandHistoryResult(true, commands.Take(limit).ToArray(), hasMore);
     }
 
     private IQueryable<ServerInstance> OwnedByUser(Guid userId) =>
         dbContext.ServerInstances.Where(serverInstance =>
             dbContext.Agents.Any(agent =>
                 agent.Id == serverInstance.AgentId && agent.UserId == userId));
+
+    private async Task<Guid?> LockOwnedServerInstanceAsync(
+        Guid serverInstanceId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        const string sql =
+            """
+            SELECT server_instance.agent_id
+            FROM server_instances AS server_instance
+            INNER JOIN agents AS agent ON agent.id = server_instance.agent_id
+            WHERE server_instance.id = @server_instance_id
+              AND agent.user_id = @user_id
+            FOR UPDATE OF server_instance
+            """;
+
+        DbConnection connection = dbContext.Database.GetDbConnection();
+        await using DbCommand command = connection.CreateCommand();
+        command.Transaction = dbContext.Database.CurrentTransaction!.GetDbTransaction();
+        command.CommandText = sql;
+        AddParameter(command, "server_instance_id", DbType.Guid, serverInstanceId);
+        AddParameter(command, "user_id", DbType.Guid, userId);
+        object? result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is Guid agentId ? agentId : null;
+    }
 
     private Task<AgentCommandSnapshot?> FindAgentCommandAsync(
         Guid commandId,
@@ -339,6 +477,16 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
 
     private static DateTimeOffset GetUtcTimestamp(DbDataReader reader, int ordinal) =>
         new(reader.GetFieldValue<DateTime>(ordinal).ToUniversalTime());
+
+    private static DateTimeOffset? GetNullableUtcTimestamp(DbDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) ? null : GetUtcTimestamp(reader, ordinal);
+
+    private static bool IsActiveAgentCommandConflict(PostgresException exception) =>
+        exception is
+        {
+            SqlState: "23505",
+            ConstraintName: ServerCommandConfiguration.ActiveAgentIndexName,
+        };
 
     private static bool IsActiveCommandConflict(DbUpdateException exception) =>
         exception.InnerException is PostgresException

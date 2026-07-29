@@ -22,7 +22,7 @@ public interface IServerInstanceRepository
         Guid userId,
         CancellationToken cancellationToken);
 
-    Task<ServerInstanceDetails?> UpdateOwnedAsync(
+    Task<UpdateServerInstanceResult> UpdateOwnedAsync(
         Guid id,
         Guid userId,
         ServerInstanceConfiguration configuration,

@@ -4,6 +4,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
+using ServerPilot.Application.Commands;
 using ServerPilot.Domain.Commands;
 using ServerPilot.Infrastructure.Persistence;
 using ServerPilot.IntegrationTests.Infrastructure;
@@ -74,6 +76,7 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(firstCommand.Id, claimed.Id);
         Assert.Equal(ServerCommandStatus.Claimed.ToString(), claimed.Status);
+        Assert.Equal(AgentCommandDeliveryKind.New.ToString(), claimed.DeliveryKind);
         Assert.Equal(1, claimed.AttemptCount);
         Assert.Equal(timeProvider.GetUtcNow(), claimed.ClaimedAt);
         Assert.DoesNotContain("executablePath", payload, StringComparison.OrdinalIgnoreCase);
@@ -86,10 +89,20 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
             .AsNoTracking()
             .SingleAsync(command => command.Id == secondCommand.Id, CancellationToken.None);
         Assert.Equal(ServerCommandStatus.Pending, remaining.Status);
+
+        using HttpResponseMessage recoveryResponse = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/agents/{agent.AgentId}/commands/claim-next");
+        ServerCommandResponse recovered =
+            (await recoveryResponse.Content.ReadFromJsonAsync<ServerCommandResponse>())!;
+        Assert.Equal(HttpStatusCode.OK, recoveryResponse.StatusCode);
+        Assert.Equal(firstCommand.Id, recovered.Id);
+        Assert.Equal(AgentCommandDeliveryKind.Recovery.ToString(), recovered.DeliveryKind);
+        Assert.Equal(1, recovered.AttemptCount);
     }
 
     [Fact]
-    public async Task ConcurrentClaimsCannotClaimTheSameCommandTwice()
+    public async Task ConcurrentClaimsReturnOneNewDeliveryAndOneRecovery()
     {
         AuthenticationResponse owner = await RegisterUserAsync("claim-race@example.com");
         RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "Race Claim Agent");
@@ -101,6 +114,14 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
             owner.AccessToken,
             server.Id,
             "start");
+        ServerInstanceResponse secondServer = await CreateServerInstanceAsync(
+            owner.AccessToken,
+            agent.AgentId,
+            "Second Race Claim Server");
+        ServerCommandResponse secondPending = await CreateCommandAsync(
+            owner.AccessToken,
+            secondServer.Id,
+            "stop");
 
         Task<HttpResponseMessage> firstClaim = SendAgentPostAsync(
             agent.Credential,
@@ -111,10 +132,19 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
         HttpResponseMessage[] responses = await Task.WhenAll(firstClaim, secondClaim);
         try
         {
-            Assert.Equal(1, responses.Count(response => response.StatusCode == HttpStatusCode.OK));
-            Assert.Equal(
-                1,
-                responses.Count(response => response.StatusCode == HttpStatusCode.NoContent));
+            Assert.All(responses, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode));
+            ServerCommandResponse?[] payloads = await Task.WhenAll(responses.Select(response =>
+                response.Content.ReadFromJsonAsync<ServerCommandResponse>()));
+            ServerCommandResponse[] deliveries = payloads
+                .Select(Assert.IsType<ServerCommandResponse>)
+                .ToArray();
+            Guid deliveredId = deliveries[0].Id;
+            Assert.Contains(deliveredId, new[] { pending.Id, secondPending.Id });
+            Assert.All(deliveries, delivery => Assert.Equal(deliveredId, delivery.Id));
+            Assert.Single(deliveries, delivery =>
+                delivery.DeliveryKind == AgentCommandDeliveryKind.New.ToString());
+            Assert.Single(deliveries, delivery =>
+                delivery.DeliveryKind == AgentCommandDeliveryKind.Recovery.ToString());
         }
         finally
         {
@@ -127,11 +157,108 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
         await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
         ServerPilotDbContext dbContext =
             scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
-        ServerCommand claimed = await dbContext.ServerCommands
+        ServerCommand[] commands = await dbContext.ServerCommands
             .AsNoTracking()
-            .SingleAsync(command => command.Id == pending.Id, CancellationToken.None);
+            .Where(command => command.Id == pending.Id || command.Id == secondPending.Id)
+            .OrderBy(command => command.CreatedAt)
+            .ToArrayAsync(CancellationToken.None);
+        ServerCommand claimed = Assert.Single(
+            commands,
+            command => command.Status == ServerCommandStatus.Claimed);
+        ServerCommand stillPending = Assert.Single(
+            commands,
+            command => command.Status == ServerCommandStatus.Pending);
+        Assert.NotEqual(claimed.Id, stillPending.Id);
+        Assert.Contains(claimed.Id, new[] { pending.Id, secondPending.Id });
+        Assert.Contains(stillPending.Id, new[] { pending.Id, secondPending.Id });
         Assert.Equal(ServerCommandStatus.Claimed, claimed.Status);
         Assert.Equal(1, claimed.AttemptCount);
+    }
+
+    [Fact]
+    public async Task DatabaseRejectsMultipleClaimedCommandsForOneAgent()
+    {
+        AuthenticationResponse owner = await RegisterUserAsync("claim-constraint@example.com");
+        RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "Constraint Agent");
+        ServerInstanceResponse firstServer = await CreateServerInstanceAsync(
+            owner.AccessToken,
+            agent.AgentId,
+            "First Constraint Server");
+        ServerInstanceResponse secondServer = await CreateServerInstanceAsync(
+            owner.AccessToken,
+            agent.AgentId,
+            "Second Constraint Server");
+        ServerCommandResponse first = await CreateCommandAsync(
+            owner.AccessToken,
+            firstServer.Id,
+            "start");
+        ServerCommandResponse second = await CreateCommandAsync(
+            owner.AccessToken,
+            secondServer.Id,
+            "start");
+
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        ServerPilotDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+        ServerCommand[] commands = await dbContext.ServerCommands
+            .Where(command => command.Id == first.Id || command.Id == second.Id)
+            .ToArrayAsync(CancellationToken.None);
+        Assert.All(commands, command => Assert.True(command.TryClaim(timeProvider.GetUtcNow())));
+
+        DbUpdateException exception = await Assert.ThrowsAsync<DbUpdateException>(() =>
+            dbContext.SaveChangesAsync(CancellationToken.None));
+        PostgresException postgresException = Assert.IsType<PostgresException>(exception.InnerException);
+        Assert.Equal("ux_server_commands_active_agent_id", postgresException.ConstraintName);
+    }
+
+    [Fact]
+    public async Task RunningCommandIsRedeliveredWithoutClaimingAnotherPendingCommand()
+    {
+        AuthenticationResponse owner = await RegisterUserAsync("running-recovery@example.com");
+        RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "Recovery Agent");
+        ServerInstanceResponse firstServer = await CreateServerInstanceAsync(
+            owner.AccessToken,
+            agent.AgentId,
+            "Running Recovery Server");
+        ServerCommandResponse firstCommand = await CreateCommandAsync(
+            owner.AccessToken,
+            firstServer.Id,
+            "start");
+        using HttpResponseMessage initialClaim = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/agents/{agent.AgentId}/commands/claim-next");
+        using HttpResponseMessage start = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/commands/{firstCommand.Id}/start");
+        Assert.Equal(HttpStatusCode.OK, initialClaim.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, start.StatusCode);
+
+        ServerInstanceResponse secondServer = await CreateServerInstanceAsync(
+            owner.AccessToken,
+            agent.AgentId,
+            "Pending Recovery Server");
+        ServerCommandResponse secondCommand = await CreateCommandAsync(
+            owner.AccessToken,
+            secondServer.Id,
+            "stop");
+
+        using HttpResponseMessage recovery = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/agents/{agent.AgentId}/commands/claim-next");
+        ServerCommandResponse redelivered =
+            (await recovery.Content.ReadFromJsonAsync<ServerCommandResponse>())!;
+        Assert.Equal(HttpStatusCode.OK, recovery.StatusCode);
+        Assert.Equal(firstCommand.Id, redelivered.Id);
+        Assert.Equal(ServerCommandStatus.Running.ToString(), redelivered.Status);
+        Assert.Equal(AgentCommandDeliveryKind.Recovery.ToString(), redelivered.DeliveryKind);
+
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        ServerPilotDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+        ServerCommand pending = await dbContext.ServerCommands
+            .AsNoTracking()
+            .SingleAsync(command => command.Id == secondCommand.Id, CancellationToken.None);
+        Assert.Equal(ServerCommandStatus.Pending, pending.Status);
     }
 
     [Fact]
@@ -232,6 +359,62 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
             $"/api/commands/{command.Id}/fail",
             new { ErrorCode = "LateFailure", ErrorMessage = "Too late." });
         Assert.Equal(HttpStatusCode.Conflict, conflictingFailure.StatusCode);
+    }
+
+    [Fact]
+    public async Task ClockRegressionReturnsConflictWithoutViolatingTimestampConstraints()
+    {
+        AuthenticationResponse owner = await RegisterUserAsync("clock-owner@example.com");
+        RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "Clock Agent");
+        ServerInstanceResponse server = await CreateServerInstanceAsync(
+            owner.AccessToken,
+            agent.AgentId,
+            "Clock Server");
+        ServerCommandResponse command = await CreateCommandAsync(
+            owner.AccessToken,
+            server.Id,
+            "start");
+
+        timeProvider.Advance(TimeSpan.FromMinutes(-1));
+        using HttpResponseMessage claim = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/agents/{agent.AgentId}/commands/claim-next");
+        ServerCommandResponse claimed =
+            (await claim.Content.ReadFromJsonAsync<ServerCommandResponse>())!;
+        Assert.Equal(HttpStatusCode.OK, claim.StatusCode);
+        Assert.Equal(command.CreatedAt, claimed.ClaimedAt);
+
+        using HttpResponseMessage regressedStart = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/commands/{command.Id}/start");
+        Assert.Equal(HttpStatusCode.Conflict, regressedStart.StatusCode);
+
+        timeProvider.Advance(TimeSpan.FromMinutes(1).Add(TimeSpan.FromSeconds(1)));
+        using HttpResponseMessage start = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/commands/{command.Id}/start");
+        Assert.Equal(HttpStatusCode.NoContent, start.StatusCode);
+
+        timeProvider.Advance(TimeSpan.FromMinutes(-2));
+        using HttpResponseMessage regressedComplete = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/commands/{command.Id}/complete");
+        using HttpResponseMessage regressedFail = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/commands/{command.Id}/fail",
+            new { ErrorCode = "ClockRegression", ErrorMessage = "Clock moved backwards." });
+        Assert.Equal(HttpStatusCode.Conflict, regressedComplete.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, regressedFail.StatusCode);
+
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        ServerPilotDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+        ServerCommand persisted = await dbContext.ServerCommands
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == command.Id, CancellationToken.None);
+        Assert.Equal(ServerCommandStatus.Running, persisted.Status);
+        Assert.Null(persisted.CompletedAt);
+        Assert.Null(persisted.ErrorCode);
     }
 
     [Fact]
@@ -425,7 +608,8 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
         DateTimeOffset? CompletedAt,
         string? ErrorCode,
         int AttemptCount,
-        Guid CorrelationId);
+        Guid CorrelationId,
+        string? DeliveryKind = null);
 
     private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

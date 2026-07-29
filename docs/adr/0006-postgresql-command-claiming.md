@@ -13,9 +13,14 @@ HTTP delivery is not exactly once.
 
 ## Decision
 
-- Claim the oldest pending command for an Agent by `(created_at, id)` in one PostgreSQL
-  statement using `SELECT ... FOR UPDATE SKIP LOCKED` inside a data-modifying CTE and
-  `UPDATE ... RETURNING`.
+- Lock the authenticated Agent row during claim so concurrent polls for that Agent are
+  serialized across API instances.
+- Return an existing `Claimed` or `Running` command first as a recovery delivery. Only
+  when none exists, claim the oldest pending command by `(created_at, id)` using
+  `SELECT ... FOR UPDATE SKIP LOCKED`, `UPDATE ... RETURNING`, and mark it as a new
+  delivery.
+- Enforce at most one `Claimed` or `Running` command per Agent with a PostgreSQL partial
+  unique index. Keep the index as the final authority for writers outside the claim path.
 - Run the statement as a short autocommit transaction. The existing
   `(agent_id, status, created_at, id)` index supports its selection predicate and order.
 - Scope claim selection and every transition update by the authenticated `agent_id`.
@@ -28,6 +33,9 @@ HTTP delivery is not exactly once.
   Other state conflicts return `409`.
 - Use API server UTC for transition timestamps. Require trimmed, bounded failure details,
   omit the raw failure message from user responses and never log either failure detail.
+- Clamp `claimed_at` to `created_at` when the API clock regresses. Add predecessor-time
+  predicates to start/complete/fail updates so a regressed clock yields `409` instead of
+  violating a database check constraint.
 
 ## Alternatives considered
 
@@ -42,19 +50,17 @@ HTTP delivery is not exactly once.
 
 ## Consequences
 
-- One command cannot be claimed twice, while concurrent polls may claim different pending
-  commands for the same Agent.
-- Locked rows are skipped instead of extending a poll request, keeping claim transactions
-  short and avoiding a blocking queue.
-- A successfully claimed command currently has no lease or automatic recovery if an Agent
-  disappears. Timeout and retry policy remain separate MVP work.
+- One Agent cannot hold multiple claimed/running commands. Overlapping polls return the
+  same command: one `New` delivery and subsequent `Recovery` deliveries.
+- A lost claim response is recoverable without a lease or a full Agent polling workflow.
+  Timeout, abandonment and reassignment policy remain separate MVP work.
 - Result idempotency has an explicit payload rule; an Agent retry can distinguish an
   accepted duplicate from a conflicting result.
 
 ## Verification evidence
 
-- PostgreSQL integration tests issue concurrent claim requests for one pending command
-  and verify one `200`, one `204`, status `Claimed` and `AttemptCount == 1`.
+- PostgreSQL integration tests issue concurrent claim requests and verify one `New` and
+  one `Recovery` response for the same command, plus the single-active-command index.
 - Integration tests verify oldest-first selection, cross-Agent `404`, conditional state
-  transitions, duplicate progress/results and bounded failure details.
+  transitions, clock regression, duplicate progress/results and bounded failure details.
 - Unit tests verify failure-detail normalization and rejection before persistence.

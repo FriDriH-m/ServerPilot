@@ -2,4 +2,5 @@ namespace ServerPilot.Application.Commands;
 
 public sealed record ServerCommandHistoryResult(
     bool ServerInstanceFound,
-    IReadOnlyList<ServerCommandDetails> Commands);
+    IReadOnlyList<ServerCommandDetails> Commands,
+    bool HasMore);

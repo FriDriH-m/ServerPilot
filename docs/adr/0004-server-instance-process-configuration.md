@@ -19,13 +19,18 @@ may still refer to it.
   foreign resources both return `404`.
 - Accept only bounded, trimmed values. Executable and working-directory values must be
   absolute Windows drive or UNC paths without `.` or `..` segments, device paths are
-  rejected, and `ProcessName` is a bare name rather than a path. The API deliberately
-  does not test whether the paths exist on the remote computer.
+  rejected after normalizing forward and backslash separators for validation, and
+  `ProcessName` is a bare name rather than a path. The API deliberately does not test
+  whether the paths exist on the remote computer.
 - Keep the Agent association immutable through the update API. Reassignment is not an
   MVP operation because it could change the machine and ownership context of a process
   configuration unexpectedly.
 - Return a safe summary from list queries. Full local paths and arguments are returned
   only to the owner from create, get-by-ID and update operations.
+- Reject changes to executable path, arguments, working directory or process name while
+  the instance has an active process state or a `Pending`, `Claimed` or `Running`
+  command. A name-only update remains allowed. Serialize that check with command creation
+  by locking the owned ServerInstance row in the same transaction.
 - Reject deletion while status is `Starting`, `Running` or `Stopping`. Perform the
   owner and inactive-state predicates in the `DELETE` statement, then distinguish an
   active item from a missing/foreign item with an owner-scoped read.
@@ -58,6 +63,8 @@ may still refer to it.
   read and the deletion attempt. A concurrent inactive-to-active transition after a
   successful delete must fail when later command-state work verifies the instance still
   exists.
+- The update guard prevents an already-created command from silently changing meaning;
+  configuration revisions and command snapshots remain deferred.
 - Cascade deletion from Agent to ServerInstance preserves referential integrity. Agent
   deletion is not exposed in the current MVP API.
 

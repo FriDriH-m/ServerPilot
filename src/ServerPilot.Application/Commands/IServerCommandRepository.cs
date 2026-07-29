@@ -4,7 +4,7 @@ namespace ServerPilot.Application.Commands;
 
 public interface IServerCommandRepository
 {
-    Task<ServerCommandDetails?> ClaimNextAsync(
+    Task<ClaimedServerCommandDetails?> ClaimNextAsync(
         Guid agentId,
         DateTimeOffset claimedAt,
         CancellationToken cancellationToken);
@@ -40,7 +40,7 @@ public interface IServerCommandRepository
     Task<ServerCommandHistoryResult> ListOwnedAsync(
         Guid serverInstanceId,
         Guid userId,
-        int skip,
+        ServerCommandHistoryCursor? after,
         int limit,
         CancellationToken cancellationToken);
 }

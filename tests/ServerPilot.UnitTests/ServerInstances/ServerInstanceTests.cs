@@ -32,6 +32,12 @@ public sealed class ServerInstanceTests
     [InlineData("C:\\Servers\\server.exe", "servers", "server.exe")]
     [InlineData("C:\\Servers\\server.exe", "C:\\Servers", "C:\\Servers\\server.exe")]
     [InlineData("\\\\?\\C:\\Servers\\server.exe", "C:\\Servers", "server.exe")]
+    [InlineData("//?/C:/Servers/server.exe", "C:\\Servers", "server.exe")]
+    [InlineData("//./C:/Servers/server.exe", "C:\\Servers", "server.exe")]
+    [InlineData("\\/?/C:\\Servers/server.exe", "C:\\Servers", "server.exe")]
+    [InlineData("C:\\Servers\\server.exe", "//?/C:/Servers", "server.exe")]
+    [InlineData("\\\\\\share\\server.exe", "C:\\Servers", "server.exe")]
+    [InlineData("\\\\server\\\\server.exe", "C:\\Servers", "server.exe")]
     [InlineData("C:\\Servers\\..\\server.exe", "C:\\Servers", "server.exe")]
     public void ConfigurationRejectsUnsafeOrRelativePaths(
         string executablePath,
@@ -48,6 +54,26 @@ public sealed class ServerInstanceTests
 
         Assert.False(created);
         Assert.Null(configuration);
+    }
+
+    [Theory]
+    [InlineData("C:/Servers/server.exe", "C:/Servers")]
+    [InlineData("\\\\server\\share\\server.exe", "\\\\server\\share")]
+    [InlineData("//server/share/server.exe", "//server/share")]
+    public void ConfigurationAcceptsValidDriveAndUncPaths(
+        string executablePath,
+        string workingDirectory)
+    {
+        bool created = ServerInstanceConfiguration.TryCreate(
+            "Server",
+            executablePath,
+            string.Empty,
+            workingDirectory,
+            "server.exe",
+            out ServerInstanceConfiguration? configuration);
+
+        Assert.True(created);
+        Assert.NotNull(configuration);
     }
 
     [Fact]

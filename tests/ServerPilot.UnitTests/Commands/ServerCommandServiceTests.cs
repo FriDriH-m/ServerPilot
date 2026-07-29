@@ -23,11 +23,9 @@ public sealed class ServerCommandServiceTests
     }
 
     [Theory]
-    [InlineData(0, 50)]
-    [InlineData(1, 0)]
-    [InlineData(1_001, 50)]
-    [InlineData(1, 101)]
-    public async Task ListRejectsInvalidPaginationBeforeCallingRepository(int page, int limit)
+    [InlineData(0)]
+    [InlineData(101)]
+    public async Task ListRejectsInvalidLimitBeforeCallingRepository(int limit)
     {
         RecordingServerCommandRepository repository = new();
         ServerCommandService service = new(repository, TimeProvider.System);
@@ -35,7 +33,7 @@ public sealed class ServerCommandServiceTests
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.ListAsync(
             Guid.NewGuid(),
             Guid.NewGuid(),
-            page,
+            null,
             limit,
             CancellationToken.None));
 
@@ -48,7 +46,7 @@ public sealed class ServerCommandServiceTests
 
         public int ListCalls { get; private set; }
 
-        public Task<ServerCommandDetails?> ClaimNextAsync(
+        public Task<ClaimedServerCommandDetails?> ClaimNextAsync(
             Guid agentId,
             DateTimeOffset claimedAt,
             CancellationToken cancellationToken) =>
@@ -94,12 +92,12 @@ public sealed class ServerCommandServiceTests
         public Task<ServerCommandHistoryResult> ListOwnedAsync(
             Guid serverInstanceId,
             Guid userId,
-            int skip,
+            ServerCommandHistoryCursor? after,
             int limit,
             CancellationToken cancellationToken)
         {
             ListCalls++;
-            return Task.FromResult(new ServerCommandHistoryResult(false, []));
+            return Task.FromResult(new ServerCommandHistoryResult(false, [], false));
         }
     }
 }
