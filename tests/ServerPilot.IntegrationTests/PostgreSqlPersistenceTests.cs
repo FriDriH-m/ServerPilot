@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using ServerPilot.Domain.Agents;
+using ServerPilot.Domain.Commands;
+using ServerPilot.Domain.ServerInstances;
 using ServerPilot.Domain.Users;
 using ServerPilot.Infrastructure.Persistence;
 using ServerPilot.IntegrationTests.Infrastructure;
@@ -42,7 +44,7 @@ public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
         Assert.Contains(
             appliedMigrations,
             migration => migration.EndsWith(
-                "_AddServerInstances",
+                "_AddServerCommands",
                 StringComparison.Ordinal));
         Assert.Empty(await dbContext.Database.GetPendingMigrationsAsync(CancellationToken.None));
 
@@ -72,6 +74,34 @@ public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
         Assert.Contains("agent_id", serverIndexDefinition, StringComparison.Ordinal);
         Assert.Contains("created_at DESC", serverIndexDefinition, StringComparison.Ordinal);
         Assert.Contains("id DESC", serverIndexDefinition, StringComparison.Ordinal);
+
+        await using var commandIndexCommand = dbContext.Database.GetDbConnection().CreateCommand();
+        commandIndexCommand.CommandText = """
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND indexname = 'ix_server_commands_agent_id_status_created_at_id'
+            """;
+        string commandIndexDefinition = Assert.IsType<string>(
+            await commandIndexCommand.ExecuteScalarAsync(CancellationToken.None));
+        Assert.Contains("agent_id", commandIndexDefinition, StringComparison.Ordinal);
+        Assert.Contains("status", commandIndexDefinition, StringComparison.Ordinal);
+        Assert.Contains("created_at", commandIndexDefinition, StringComparison.Ordinal);
+        Assert.Contains("id", commandIndexDefinition, StringComparison.Ordinal);
+
+        await using var commandHistoryIndexCommand = dbContext.Database.GetDbConnection()
+            .CreateCommand();
+        commandHistoryIndexCommand.CommandText = """
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND indexname = 'ix_server_commands_server_instance_id_created_at_id'
+            """;
+        string commandHistoryIndexDefinition = Assert.IsType<string>(
+            await commandHistoryIndexCommand.ExecuteScalarAsync(CancellationToken.None));
+        Assert.Contains("server_instance_id", commandHistoryIndexDefinition, StringComparison.Ordinal);
+        Assert.Contains("created_at DESC", commandHistoryIndexDefinition, StringComparison.Ordinal);
+        Assert.Contains("id DESC", commandHistoryIndexDefinition, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -209,5 +239,134 @@ public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
                      {createdAt}, {createdAt})
                 """, CancellationToken.None));
         Assert.Equal("ck_server_instances_valid_state", invalidState.ConstraintName);
+    }
+
+    [Fact]
+    public async Task ServerCommandPersistsItsLifecycleAndFailureDetails()
+    {
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        ServerPilotDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+        DateTimeOffset createdAt = DateTimeOffset.UtcNow;
+        Agent agent = await CreateAgentAsync(dbContext, "command-persistence@example.com", createdAt);
+        ServerInstance serverInstance = CreateServerInstance(agent.Id, createdAt);
+        ServerCommand command = ServerCommand.Create(
+            Guid.NewGuid(),
+            agent.Id,
+            serverInstance.Id,
+            ServerCommandType.StartServer,
+            createdAt,
+            Guid.NewGuid());
+        Assert.True(command.TryClaim(createdAt.AddSeconds(1)));
+        Assert.True(command.TryStart(createdAt.AddSeconds(2)));
+        Assert.True(command.TryFail(createdAt.AddSeconds(3), " ProcessFailed ", " Process exited. "));
+
+        dbContext.AddRange(serverInstance, command);
+        await dbContext.SaveChangesAsync(CancellationToken.None);
+        dbContext.ChangeTracker.Clear();
+
+        ServerCommand persisted = await dbContext.ServerCommands
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == command.Id, CancellationToken.None);
+
+        Assert.Equal(ServerCommandStatus.Failed, persisted.Status);
+        Assert.Equal(agent.Id, persisted.AgentId);
+        Assert.Equal(serverInstance.Id, persisted.ServerInstanceId);
+        Assert.Equal(ServerCommandType.StartServer, persisted.Type);
+        Assert.Equal(1, persisted.AttemptCount);
+        Assert.Equal("ProcessFailed", persisted.ErrorCode);
+        Assert.Equal("Process exited.", persisted.ErrorMessage);
+        Assert.Equal(
+            createdAt.AddSeconds(3).Ticks / 10,
+            Assert.IsType<DateTimeOffset>(persisted.CompletedAt).Ticks / 10);
+    }
+
+    [Fact]
+    public async Task DatabaseRejectsInvalidCommandStateAndMismatchedServerAgent()
+    {
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        ServerPilotDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+        DateTimeOffset createdAt = DateTimeOffset.UtcNow;
+        Agent firstAgent = await CreateAgentAsync(
+            dbContext,
+            "command-first-agent@example.com",
+            createdAt);
+        Agent secondAgent = await CreateAgentAsync(
+            dbContext,
+            "command-second-agent@example.com",
+            createdAt);
+        ServerInstance serverInstance = CreateServerInstance(firstAgent.Id, createdAt);
+        dbContext.ServerInstances.Add(serverInstance);
+        await dbContext.SaveChangesAsync(CancellationToken.None);
+
+        PostgresException invalidState = await Assert.ThrowsAsync<PostgresException>(() =>
+            dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO server_commands
+                    (id, agent_id, server_instance_id, type, status, created_at, claimed_at,
+                     started_at, completed_at, error_code, error_message, attempt_count,
+                     correlation_id)
+                VALUES
+                    ({Guid.NewGuid()}, {firstAgent.Id}, {serverInstance.Id}, 1, 5, {createdAt},
+                     {createdAt.AddSeconds(1)}, {createdAt.AddSeconds(2)},
+                     {createdAt.AddSeconds(3)}, NULL, NULL, 1, {Guid.NewGuid()})
+                """, CancellationToken.None));
+        Assert.Equal("ck_server_commands_valid_failure_details", invalidState.ConstraintName);
+
+        PostgresException mismatchedAgent = await Assert.ThrowsAsync<PostgresException>(() =>
+            dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO server_commands
+                    (id, agent_id, server_instance_id, type, status, created_at, claimed_at,
+                     started_at, completed_at, error_code, error_message, attempt_count,
+                     correlation_id)
+                VALUES
+                    ({Guid.NewGuid()}, {secondAgent.Id}, {serverInstance.Id}, 1, 1, {createdAt},
+                     NULL, NULL, NULL, NULL, NULL, 0, {Guid.NewGuid()})
+                """, CancellationToken.None));
+        Assert.Equal(
+            "fk_server_commands_server_instances_agent_id_server_instance_id",
+            mismatchedAgent.ConstraintName);
+    }
+
+    private static async Task<Agent> CreateAgentAsync(
+        ServerPilotDbContext dbContext,
+        string email,
+        DateTimeOffset createdAt)
+    {
+        User user = User.Create(
+            Guid.NewGuid(),
+            email,
+            email.ToUpperInvariant(),
+            "test-password-hash",
+            createdAt);
+        Agent agent = Agent.Create(
+            Guid.NewGuid(),
+            user.Id,
+            "Agent",
+            "HOST",
+            "Windows",
+            "1.0.0",
+            string.Concat(Guid.NewGuid().ToString("N"), Guid.NewGuid().ToString("N")),
+            createdAt);
+        dbContext.AddRange(user, agent);
+        await dbContext.SaveChangesAsync(CancellationToken.None);
+        return agent;
+    }
+
+    private static ServerInstance CreateServerInstance(Guid agentId, DateTimeOffset createdAt)
+    {
+        Assert.True(ServerInstanceConfiguration.TryCreate(
+            "Server",
+            "C:\\Servers\\server.exe",
+            string.Empty,
+            "C:\\Servers",
+            "server.exe",
+            out ServerInstanceConfiguration? configuration));
+
+        return ServerInstance.Create(
+            Guid.NewGuid(),
+            agentId,
+            Assert.IsType<ServerInstanceConfiguration>(configuration),
+            createdAt);
     }
 }
