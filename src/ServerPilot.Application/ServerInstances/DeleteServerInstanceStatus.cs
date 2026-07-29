@@ -5,4 +5,5 @@ public enum DeleteServerInstanceStatus
     Succeeded,
     NotFound,
     Active,
+    HasCommandHistory,
 }

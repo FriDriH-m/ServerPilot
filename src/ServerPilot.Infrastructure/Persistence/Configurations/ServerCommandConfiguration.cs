@@ -11,6 +11,8 @@ internal sealed class ServerCommandConfiguration : IEntityTypeConfiguration<Serv
         "ix_server_commands_agent_id_status_created_at_id";
     internal const string ServerInstanceCreatedAtIdIndexName =
         "ix_server_commands_server_instance_id_created_at_id";
+    internal const string ActiveServerInstanceIndexName =
+        "ux_server_commands_active_server_instance_id";
     internal const string ValidTypeAndStatusConstraintName =
         "ck_server_commands_valid_type_and_status";
     internal const string ValidStateConstraintName = "ck_server_commands_valid_state";
@@ -113,6 +115,10 @@ internal sealed class ServerCommandConfiguration : IEntityTypeConfiguration<Serv
         })
             .IsDescending(false, true, true)
             .HasDatabaseName(ServerInstanceCreatedAtIdIndexName);
+        builder.HasIndex(command => command.ServerInstanceId)
+            .IsUnique()
+            .HasFilter("status IN (1, 2, 3)")
+            .HasDatabaseName(ActiveServerInstanceIndexName);
 
         builder.HasOne<ServerInstance>()
             .WithMany()

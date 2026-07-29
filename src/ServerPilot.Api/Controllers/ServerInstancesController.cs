@@ -54,6 +54,11 @@ public sealed class ServerInstancesController(
             LogLevel.Warning,
             new EventId(1405, nameof(LogActiveServerInstanceDeletion)),
             "User {UserId} attempted to delete active ServerInstance {ServerInstanceId}");
+    private static readonly Action<ILogger, Guid, Guid, Exception?>
+        LogServerInstanceDeletionWithCommandHistory = LoggerMessage.Define<Guid, Guid>(
+            LogLevel.Warning,
+            new EventId(1406, nameof(LogServerInstanceDeletionWithCommandHistory)),
+            "User {UserId} attempted to delete ServerInstance {ServerInstanceId} with command history");
 
     [HttpPost]
     public async Task<ActionResult<ServerInstanceResponse>> Create(
@@ -203,6 +208,15 @@ public sealed class ServerInstancesController(
                 statusCode: StatusCodes.Status409Conflict,
                 title: "Conflict",
                 detail: "An active ServerInstance cannot be deleted.");
+        }
+
+        if (status == DeleteServerInstanceStatus.HasCommandHistory)
+        {
+            LogServerInstanceDeletionWithCommandHistory(logger, userId, id, null);
+            return Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Conflict",
+                detail: "A ServerInstance with command history cannot be deleted.");
         }
 
         LogServerInstanceNotFound(logger, userId, id, null);
