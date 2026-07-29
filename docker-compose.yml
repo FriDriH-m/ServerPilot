@@ -19,15 +19,36 @@ services:
     build:
       context: .
       dockerfile: src/ServerPilot.Api/Dockerfile
+      target: final
     environment:
       ASPNETCORE_HTTP_PORTS: 8080
       ConnectionStrings__PostgreSql: Host=postgres;Port=5432;Database=serverpilot;Username=serverpilot;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       Authentication__Jwt__SigningKey: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:${SERVERPILOT_API_HOST_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: src/ServerPilot.Api/Dockerfile
+      target: migrate
+    environment:
+      ConnectionStrings__PostgreSql: Host=postgres;Port=5432;Database=serverpilot;Username=serverpilot;Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
 volumes:
   serverpilot-postgres:

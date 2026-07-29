@@ -79,7 +79,7 @@ Process supervisor boundary
 Windows process: bounded graceful wait, then explicit logged forced termination
 ```
 
-The client/API and API/PostgreSQL transitions are trust boundaries. The JWT signing
+The client/API, Compose migration/API and API/PostgreSQL transitions are trust boundaries. The JWT signing
 key is process configuration and never crosses to PostgreSQL or source control. The
 raw installation token crosses the API boundary only in its creation response and is
 not recoverable from persisted data. The raw Agent credential is likewise returned once,
@@ -96,6 +96,9 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Stolen access token | Short 30-minute lifetime; tokens are not persisted or logged | No immediate revocation or refresh-token flow |
 | Client-supplied ownership identifier | Authenticated user ID comes from the validated `sub` claim; Agent and ServerInstance queries scope through that owner | Future owned resources must preserve the same owner-scoped query pattern |
 | Known or committed deployment secret | Example secrets are empty, Compose requires explicit values, and startup rejects the former public JWT placeholder | Operators must generate, rotate and protect strong deployment-specific values |
+| API starts against a missing or stale schema | A one-shot Compose migration service waits for healthy PostgreSQL and must succeed before the API starts; readiness also rejects pending migrations | Operators must inspect and correct a failed migration before explicitly retrying Compose |
+| Migration service retries a failing schema change indefinitely | The migration container has `restart: "no"` and its failure blocks the dependent API instead of hiding the fault | Compose does not provide production deployment orchestration or rollout coordination |
+| Local reset accidentally leaves or exposes persisted data | PostgreSQL data lives only in a named volume; normal shutdown preserves it and the documented reset explicitly removes it | `down --volumes` is destructive and local operators must confirm the target project before running it |
 | Credential response cached | JWT, raw installation-token and raw Agent-credential responses use `Cache-Control: no-store` | Clients must still protect credentials after receipt |
 | Online credential guessing or token flooding | Fixed-window limits protect anonymous authentication and authenticated token endpoints; active token count and list size are bounded | Distributed deployments will need a shared or upstream limiter if per-process limits are insufficient |
 | Predictable installation credential | 256 random bits from .NET `RandomNumberGenerator`; a GUID or user identifier is never used as the credential | Entropy depends on the operating system CSPRNG |
