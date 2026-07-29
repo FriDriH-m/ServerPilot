@@ -23,11 +23,11 @@ public sealed class ServerCommandsController(
     private const int DefaultListLimit = 50;
     private const int MaximumListLimit = 100;
 
-    private static readonly Action<ILogger, Guid, Guid, Guid, ServerCommandType, Exception?>
-        LogServerCommandCreated = LoggerMessage.Define<Guid, Guid, Guid, ServerCommandType>(
+    private static readonly Action<ILogger, Guid, Guid, ServerCommandType, Guid, Guid, Exception?>
+        LogServerCommandCreated = LoggerMessage.Define<Guid, Guid, ServerCommandType, Guid, Guid>(
             LogLevel.Information,
             new EventId(1500, nameof(LogServerCommandCreated)),
-            "User {UserId} created ServerCommand {CommandId} of type {CommandType} for ServerInstance {ServerInstanceId}");
+            "User {UserId} created ServerCommand {CommandId} of type {CommandType} for ServerInstance {ServerInstanceId} with CorrelationId {CorrelationId}");
     private static readonly Action<ILogger, Guid, Guid, Exception?> LogServerInstanceNotFound =
         LoggerMessage.Define<Guid, Guid>(
             LogLevel.Warning,
@@ -109,10 +109,12 @@ public sealed class ServerCommandsController(
             return Unauthorized();
         }
 
+        Guid correlationId = Guid.NewGuid();
         CreateServerCommandResult result = await commands.CreateAsync(
             userId,
             serverInstanceId,
             type,
+            correlationId,
             cancellationToken);
         if (result.Status == CreateServerCommandStatus.ServerInstanceNotFound)
         {
@@ -136,13 +138,24 @@ public sealed class ServerCommandsController(
         }
 
         ServerCommandDetails command = result.Command;
-        LogServerCommandCreated(
-            logger,
-            userId,
-            command.Id,
-            command.ServerInstanceId,
-            command.Type,
-            null);
+        using (logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["UserId"] = userId,
+            ["AgentId"] = command.AgentId,
+            ["ServerInstanceId"] = command.ServerInstanceId,
+            ["CommandId"] = command.Id,
+            ["CorrelationId"] = command.CorrelationId,
+        }))
+        {
+            LogServerCommandCreated(
+                logger,
+                userId,
+                command.Id,
+                command.Type,
+                command.ServerInstanceId,
+                command.CorrelationId,
+                null);
+        }
         return StatusCode(StatusCodes.Status201Created, ToResponse(command));
     }
 

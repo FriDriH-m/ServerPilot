@@ -10,9 +10,15 @@ public sealed class ServerCommandService(
         Guid userId,
         Guid serverInstanceId,
         ServerCommandType type,
+        Guid correlationId,
         CancellationToken cancellationToken)
     {
         ValidateUserId(userId);
+
+        if (correlationId == Guid.Empty)
+        {
+            throw new ArgumentException("Correlation ID cannot be empty.", nameof(correlationId));
+        }
 
         if (serverInstanceId == Guid.Empty)
         {
@@ -33,7 +39,7 @@ public sealed class ServerCommandService(
             userId,
             type,
             timeProvider.GetUtcNow(),
-            Guid.NewGuid(),
+            correlationId,
             cancellationToken);
     }
 

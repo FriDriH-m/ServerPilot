@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using ServerPilot.Api.Authentication;
+using ServerPilot.Api.Diagnostics;
 using ServerPilot.Api.Health;
 using ServerPilot.Api.Http;
 using ServerPilot.Application.Agents;
@@ -60,6 +61,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentAgent, HttpContextCurrentAgent>();
 builder.Services.AddScoped<ICurrentUser, HttpContextCurrentUser>();
 builder.Services.AddControllers();
+builder.Services.AddHostedService<ApiLifetimeLogger>();
 builder.Services.AddProblemDetails(options =>
 {
     options.CustomizeProblemDetails = context =>

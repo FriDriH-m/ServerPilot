@@ -16,11 +16,11 @@ public sealed class AgentCommandsController(
     ICurrentAgent currentAgent,
     ILogger<AgentCommandsController> logger) : ControllerBase
 {
-    private static readonly Action<ILogger, Guid, Guid, AgentCommandDeliveryKind, Exception?>
-        LogCommandDelivered = LoggerMessage.Define<Guid, Guid, AgentCommandDeliveryKind>(
+    private static readonly Action<ILogger, Guid, Guid, AgentCommandDeliveryKind, Guid, Exception?>
+        LogCommandDelivered = LoggerMessage.Define<Guid, Guid, AgentCommandDeliveryKind, Guid>(
             LogLevel.Information,
             new EventId(1600, nameof(LogCommandDelivered)),
-            "Agent {AgentId} received ServerCommand {CommandId} as {DeliveryKind}");
+            "Agent {AgentId} received ServerCommand {CommandId} as {DeliveryKind} with CorrelationId {CorrelationId}");
     private static readonly Action<ILogger, Guid, Guid, Exception?> LogForeignClaimAttempt =
         LoggerMessage.Define<Guid, Guid>(
             LogLevel.Warning,
@@ -61,12 +61,23 @@ public sealed class AgentCommandsController(
             return NoContent();
         }
 
-        LogCommandDelivered(
-            logger,
-            authenticatedAgentId,
-            delivery.Command.Id,
-            delivery.DeliveryKind,
-            null);
+        ServerCommandDetails command = delivery.Command;
+        using (logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["AgentId"] = authenticatedAgentId,
+            ["ServerInstanceId"] = command.ServerInstanceId,
+            ["CommandId"] = command.Id,
+            ["CorrelationId"] = command.CorrelationId,
+        }))
+        {
+            LogCommandDelivered(
+                logger,
+                authenticatedAgentId,
+                command.Id,
+                delivery.DeliveryKind,
+                command.CorrelationId,
+                null);
+        }
         return Ok(ToResponse(delivery));
     }
 

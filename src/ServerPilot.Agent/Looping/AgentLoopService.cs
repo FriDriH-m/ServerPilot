@@ -31,11 +31,12 @@ public sealed class AgentLoopService(
             new EventId(201, nameof(LogFatalFailure)),
             "Agent {AgentId} stopped its {LoopName} loop because of {FailureKind} API failure");
 
-    private static readonly Action<ILogger, Guid, Guid, Guid, string, Exception?> LogCommandReserved =
-        LoggerMessage.Define<Guid, Guid, Guid, string>(
+    private static readonly Action<ILogger, Guid, Guid, Guid, Guid, string, Exception?>
+        LogCommandReserved =
+        LoggerMessage.Define<Guid, Guid, Guid, Guid, string>(
             LogLevel.Information,
             new EventId(202, nameof(LogCommandReserved)),
-            "Agent {AgentId} reserved ServerCommand {CommandId} with CorrelationId {CorrelationId} as {DeliveryKind}");
+            "Agent {AgentId} reserved ServerCommand {CommandId} for ServerInstance {ServerInstanceId} with CorrelationId {CorrelationId} as {DeliveryKind}");
 
     public async Task RunAsync(AgentCredential credential, CancellationToken cancellationToken)
     {
@@ -146,6 +147,7 @@ public sealed class AgentLoopService(
                             logger,
                             credential.AgentId,
                             command.Id,
+                            command.ServerInstanceId,
                             command.CorrelationId,
                             command.DeliveryKind,
                             null);

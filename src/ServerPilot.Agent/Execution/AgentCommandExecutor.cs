@@ -44,6 +44,13 @@ public sealed class AgentCommandExecutor(
         ArgumentNullException.ThrowIfNull(execution);
 
         ClaimedAgentCommand command = execution.Command;
+        using IDisposable? commandScope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            ["AgentId"] = credential.AgentId,
+            ["ServerInstanceId"] = command.ServerInstanceId,
+            ["CommandId"] = command.Id,
+            ["CorrelationId"] = command.CorrelationId,
+        });
         if (!execution.RunningReported)
         {
             await retry.ExecuteAsync(
@@ -76,6 +83,7 @@ public sealed class AgentCommandExecutor(
                     credential,
                     command.ServerInstanceId,
                     recordedOutcome.ProcessState,
+                    command.CorrelationId,
                     token),
                 cancellationToken);
             execution.MarkProcessStateReported();

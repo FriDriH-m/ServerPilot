@@ -176,6 +176,7 @@ public sealed class HttpAgentApiClientTests
         HttpAgentApiClient client = CreateClient(handler);
         AgentCredential credential = CreateCredential();
         Guid serverInstanceId = Guid.NewGuid();
+        Guid correlationId = Guid.NewGuid();
         ProcessIdentity identity = new(
             42,
             new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero),
@@ -186,12 +187,14 @@ public sealed class HttpAgentApiClientTests
             credential,
             serverInstanceId,
             AgentProcessStateReport.Running(identity),
+            correlationId,
             CancellationToken.None);
 
         Assert.Equal(
             $"/api/agents/{credential.AgentId}/server-instances/{serverInstanceId}/status",
             handler.RequestUri?.AbsolutePath);
         Assert.Equal("Agent", handler.Authorization?.Scheme);
+        Assert.Equal(correlationId.ToString("D"), handler.CorrelationId);
         using JsonDocument body = JsonDocument.Parse(handler.Body!);
         Assert.Equal("Running", body.RootElement.GetProperty("status").GetString());
         Assert.Equal(42, body.RootElement.GetProperty("processId").GetInt32());
@@ -288,12 +291,17 @@ public sealed class HttpAgentApiClientTests
 
         public string? Body { get; private set; }
 
+        public string? CorrelationId { get; private set; }
+
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             RequestUri = request.RequestUri;
             Authorization = request.Headers.Authorization;
+            CorrelationId = request.Headers.TryGetValues("X-Correlation-ID", out IEnumerable<string>? values)
+                ? Assert.Single(values)
+                : null;
             Body = await request.Content!.ReadAsStringAsync(cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.NoContent);
         }
