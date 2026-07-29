@@ -48,6 +48,35 @@ public sealed class ServerCommandServiceTests
 
         public int ListCalls { get; private set; }
 
+        public Task<ServerCommandDetails?> ClaimNextAsync(
+            Guid agentId,
+            DateTimeOffset claimedAt,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<AgentCommandTransitionStatus> StartAsync(
+            Guid commandId,
+            Guid agentId,
+            DateTimeOffset startedAt,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<AgentCommandTransitionStatus> CompleteAsync(
+            Guid commandId,
+            Guid agentId,
+            DateTimeOffset completedAt,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<AgentCommandTransitionStatus> FailAsync(
+            Guid commandId,
+            Guid agentId,
+            DateTimeOffset completedAt,
+            string errorCode,
+            string errorMessage,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public Task<CreateServerCommandResult> CreateOwnedAsync(
             Guid serverInstanceId,
             Guid userId,

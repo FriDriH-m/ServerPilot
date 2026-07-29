@@ -213,6 +213,8 @@ API
 - [`docs/adr/0002-one-time-agent-installation-tokens.md`](docs/adr/0002-one-time-agent-installation-tokens.md) — решение по одноразовым installation tokens.
 - [`docs/adr/0003-agent-registration-and-opaque-credentials.md`](docs/adr/0003-agent-registration-and-opaque-credentials.md) — решение по атомарной регистрации и отдельным Agent credentials.
 - [`docs/adr/0004-server-instance-process-configuration.md`](docs/adr/0004-server-instance-process-configuration.md) — решение по конфигурации локального процесса и её границе доверия.
+- [`docs/adr/0005-active-server-command-uniqueness.md`](docs/adr/0005-active-server-command-uniqueness.md) — решение по единственной активной команде для ServerInstance.
+- [`docs/adr/0006-postgresql-command-claiming.md`](docs/adr/0006-postgresql-command-claiming.md) — решение по атомарной выдаче команд Agent через PostgreSQL.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -377,6 +379,17 @@ ID или изменение. API проверяет базовую форму �
 необработанного сообщения Agent. Экземпляр с историей команд не удаляется и также
 возвращает `409`, чтобы не потерять историю.
 
+Agent с отдельным credential забирает старейшую ожидающую команду через
+`POST /api/agents/{agentId}/commands/claim-next`. PostgreSQL атомарно переводит её из
+`Pending` в `Claimed`, поэтому параллельные poll-запросы не получают одну команду
+дважды. Agent сообщает прогресс и результат через
+`POST /api/commands/{commandId}/start`, `/complete` и `/fail`. Все изменения привязаны
+к Agent ID из credential; чужие команды возвращают `404`, недопустимые переходы —
+`409`, а точные повторы уже применённого перехода безопасно возвращают `204`.
+Failure code и message обязательны, обрезаются по краям и ограничены по длине; сырое
+сообщение сохраняется для диагностики, но не попадает в пользовательскую историю или
+структурированные логи.
+
 ## Continuous integration
 
 Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) запускается для каждого pull request в `main` и каждого push в `main`.
@@ -421,8 +434,12 @@ dotnet ef database update --project src/ServerPilot.Infrastructure --startup-pro
 
 Завершены foundation, PostgreSQL, API conventions, CI, пользовательская JWT-аутентификация,
 одноразовые Agent installation tokens, регистрация, отдельная аутентификация, heartbeat,
-пользовательские Agent queries, ServerInstance configuration/ownership и доменная модель
-ServerCommand с конечным автоматом состояний. Текущая функциональная задача — #24,
-пользовательские endpoints создания Start/Stop-команд и просмотра истории команд.
+пользовательские Agent queries, ServerInstance configuration/ownership, пользовательские
+Start/Stop endpoints, история ServerCommand и Agent endpoints атомарной выдачи, прогресса
+и результата команд. Реализована функциональная задача #25.
+
+Рекомендуемая следующая задача — #26: bootstrap Agent, typed configuration и безопасное
+локальное хранение выданного credential. Polling loop и выполнение процессов остаются в
+последующих задачах MVP.
 
 Текущая цель — реализовать минимальный рабочий вертикальный сценарий без преждевременного добавления сложной инфраструктуры.
