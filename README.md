@@ -215,6 +215,7 @@ API
 - [`docs/adr/0004-server-instance-process-configuration.md`](docs/adr/0004-server-instance-process-configuration.md) — решение по конфигурации локального процесса и её границе доверия.
 - [`docs/adr/0005-active-server-command-uniqueness.md`](docs/adr/0005-active-server-command-uniqueness.md) — решение по единственной активной команде для ServerInstance.
 - [`docs/adr/0006-postgresql-command-claiming.md`](docs/adr/0006-postgresql-command-claiming.md) — решение по атомарной выдаче команд Agent через PostgreSQL.
+- [`docs/adr/0007-agent-heartbeat-and-command-polling.md`](docs/adr/0007-agent-heartbeat-and-command-polling.md) — решение по Agent heartbeat, polling и ограниченным retry.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -356,6 +357,25 @@ Agent ID сохраняется атомарно в
 скомпрометированным, сначала отзовите его через API, затем удалите локальный файл и
 зарегистрируйте Agent заново.
 
+### Heartbeat и polling Agent
+
+После bootstrap Agent использует сохранённый credential в заголовке `Authorization`
+каждого запроса и запускает независимые последовательные циклы для
+`POST /api/agents/{id}/heartbeat` и
+`POST /api/agents/{id}/commands/claim-next`. Следующая итерация начинается только
+после завершения предыдущего запроса и задержки, поэтому медленный API не создаёт
+перекрывающихся heartbeat или claim.
+
+Ошибки сети, `408`, `429` и `5xx` повторяются не более трёх раз после первого запроса
+с экспоненциальной задержкой 1/2/4 секунды и bounded jitter; затем цикл возвращается к
+настроенному интервалу. `401`/`403`, другие неожиданные `4xx` и некорректный ответ API
+считаются неисправимой credential/configuration ошибкой: Agent пишет структурированное
+событие без секрета и останавливается, не создавая бесконечный retry loop.
+
+После `claim-next` Agent удерживает одну команду в памяти и не забирает следующую до
+появления executor в #29. Он пока не запускает локальный процесс и не отправляет
+transition: это остаётся задачами #28 и #29.
+
 ### Heartbeat и доступность Agent
 
 Аутентифицированный Agent отправляет heartbeat через
@@ -476,17 +496,17 @@ dotnet ef database update --project src/ServerPilot.Infrastructure --startup-pro
 одноразовые Agent installation tokens, регистрация, отдельная аутентификация, heartbeat,
 пользовательские Agent queries, ServerInstance configuration/ownership, пользовательские
 Start/Stop endpoints, история ServerCommand и Agent endpoints атомарной выдачи, прогресса
-и результата команд. Реализованы функциональные задачи #25 и #26. Agent теперь
+и результата команд. Реализованы функциональные задачи #25, #26 и #27. Agent теперь
 валидирует typed configuration до запуска фоновых циклов, регистрируется по installation
 token только при первом запуске и хранит выданный credential в Windows DPAPI-защищённом
-local storage текущего пользователя. После независимого аудита добавлены минимальные
+local storage текущего пользователя, отправляет heartbeat и последовательно получает
+следующую команду с ограниченными transient retry. После независимого аудита добавлены минимальные
 hardening-исправления: безопасная проверка Windows-путей со смешанными разделителями,
 защита process-critical конфигурации при активной команде, восстановление потерянного
 claim-response, cursor pagination истории, защита переходов при регрессии часов и
 PostgreSQL-инвариант одной `Claimed`/`Running` команды на Agent.
 
-Следующие разблокированные задачи — #27 (heartbeat и polling loop) и #28 (безопасный
-process supervisor). Они независимы друг от друга после #26, но должны выполняться в
-изолированных worktree.
+Следующая задача — #28: безопасный process supervisor. После неё #29 добавит
+идемпотентное выполнение StartServer/StopServer к уже работающему polling loop.
 
 Текущая цель — реализовать минимальный рабочий вертикальный сценарий без преждевременного добавления сложной инфраструктуры.
