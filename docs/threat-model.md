@@ -2,10 +2,10 @@
 
 This lightweight model is updated when an active issue introduces a real trust
 boundary. It currently covers user authentication, one-time Agent installation tokens,
-Agent registration, revocable Agent credentials, persisted ServerInstance process
-configuration, owner-created ServerCommand history and Agent-authenticated command
-claim/result updates. The local-process execution boundary will be expanded when command
-execution is implemented.
+Agent registration, revocable Agent credentials, Windows DPAPI-protected local Agent
+credential storage, persisted ServerInstance process configuration, owner-created
+ServerCommand history and Agent-authenticated command claim/result updates. The
+local-process execution boundary will be expanded when command execution is implemented.
 
 ## Data flow and trust boundaries
 
@@ -32,6 +32,11 @@ ASP.NET Core API -> PostgreSQL: credential-hash lookup + revocation state
   | authenticated heartbeat: server UTC only
   v
 PostgreSQL: monotonic last_seen_at
+
+Registered Agent
+  | current Windows user + DPAPI CurrentUser protection
+  v
+%LOCALAPPDATA%\ServerPilot\agent-credential.dat: encrypted Agent ID, scheme and credential
 
 User/client -> ASP.NET Core API -> PostgreSQL: owner-scoped Agent metadata query
   | response: safe metadata + derived Online/Offline state
@@ -76,7 +81,8 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Stolen installation token | 15-minute default lifetime, configurable bounded expiry and explicit revocation | The credential is bearer-only, so HTTPS and client-side protection remain mandatory |
 | Cross-user token or Agent access | Installation-token operations, Agent reads and credential revocation are scoped to the JWT subject; foreign IDs return 404 | Every future owned resource must preserve the same owner-scoped query pattern |
 | Reuse of expired, revoked or used installation token | Agent creation and conditional token consumption share one transaction; inactive/concurrently consumed tokens update zero rows | PostgreSQL remains the single registration authority |
-| Agent credential disclosed by database | 256 random bits; only a SHA-256 hash is persisted and indexed | The raw bearer credential must be stored securely by the Agent in issue #26 |
+| Agent credential disclosed by database | 256 random bits; only a SHA-256 hash is persisted and indexed | The raw bearer credential is stored only on the registered Windows Agent |
+| Local Agent credential file is copied or read by another user | The payload is encrypted by Windows DPAPI with `CurrentUser` scope and stored under the current user's local application-data directory; atomic replacement avoids a partially written credential | Malware or an interactive process running as the same Windows user can still use DPAPI; protect that account and revoke/re-register if compromise is suspected |
 | User/Agent principal confusion | User endpoints use the default Bearer JWT scheme; Agent endpoints require an explicit Agent policy and claim | Every future heartbeat/command endpoint must select the Agent policy |
 | Stolen or revoked Agent credential | Authentication checks the hash and `credential_revoked_at` in PostgreSQL on every request; the owner can revoke credentials | Credentials do not expire or rotate automatically in the MVP; an in-flight request is not cancelled |
 | Agent submits heartbeat for another Agent | The route ID must equal the exact Agent ID resolved by authentication; mismatches return 404 and do not write | A credential still acts as its own Agent until revoked |
@@ -100,6 +106,8 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 - Never log passwords, password hashes, bearer tokens or signing keys.
 - Never persist or return the raw Agent installation token after its creation response.
 - Never persist, log or return the raw Agent credential after registration.
+- Persist the Agent credential only in the current Windows user's DPAPI-protected local
+  storage; never commit it or keep it in `appsettings.json`.
 - Never authorize ownership from a user ID supplied in a request body or route.
 - Only accept JWTs matching the configured issuer, audience and signing algorithm.
 - Consume an installation token and create its Agent in one transaction.
