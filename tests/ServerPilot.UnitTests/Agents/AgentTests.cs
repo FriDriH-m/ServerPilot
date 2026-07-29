@@ -1,4 +1,5 @@
 using ServerPilot.Domain.Agents;
+using DomainAgent = ServerPilot.Domain.Agents.Agent;
 
 namespace ServerPilot.UnitTests.Agents;
 
@@ -13,14 +14,14 @@ public sealed class AgentTests
         Guid agentId = Guid.NewGuid();
         Guid userId = Guid.NewGuid();
 
-        Agent agent = Agent.Create(
+        DomainAgent agent = DomainAgent.Create(
             agentId,
             userId,
             "  Primary Agent  ",
             "  GAME-HOST  ",
             "  Windows 11  ",
             "  1.0.0  ",
-            new string('a', Agent.CredentialHashLength),
+            new string('a', DomainAgent.CredentialHashLength),
             RegisteredAt);
 
         Assert.Equal(agentId, agent.Id);
@@ -35,21 +36,21 @@ public sealed class AgentTests
     [Fact]
     public void CreateRejectsInvalidCredentialHash()
     {
-        Assert.Throws<ArgumentException>(() => Agent.Create(
+        Assert.Throws<ArgumentException>(() => DomainAgent.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             "Agent",
             "HOST",
             "Windows",
             "1.0.0",
-            new string('A', Agent.CredentialHashLength),
+            new string('A', DomainAgent.CredentialHashLength),
             RegisteredAt));
     }
 
     [Fact]
     public void RecordHeartbeatPreservesLatestTimestamp()
     {
-        Agent agent = CreateAgent();
+        DomainAgent agent = CreateAgent();
         DateTimeOffset latestHeartbeat = RegisteredAt.AddSeconds(20);
 
         bool firstRecorded = agent.RecordHeartbeat(latestHeartbeat);
@@ -65,7 +66,7 @@ public sealed class AgentTests
     [Fact]
     public void RecordHeartbeatRejectsTimestampBeforeRegistration()
     {
-        Agent agent = CreateAgent();
+        DomainAgent agent = CreateAgent();
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             agent.RecordHeartbeat(RegisteredAt.AddTicks(-1)));
@@ -74,7 +75,7 @@ public sealed class AgentTests
     [Fact]
     public void RevokeCredentialsIsIdempotentAndPreservesFirstTimestamp()
     {
-        Agent agent = CreateAgent();
+        DomainAgent agent = CreateAgent();
         DateTimeOffset firstRevocation = RegisteredAt.AddMinutes(1);
 
         AgentCredentialRevocationResult first = agent.RevokeCredentials(firstRevocation);
@@ -89,19 +90,19 @@ public sealed class AgentTests
     [Fact]
     public void RevokeCredentialsRejectsTimestampBeforeRegistration()
     {
-        Agent agent = CreateAgent();
+        DomainAgent agent = CreateAgent();
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             agent.RevokeCredentials(RegisteredAt.AddTicks(-1)));
     }
 
-    private static Agent CreateAgent() => Agent.Create(
+    private static DomainAgent CreateAgent() => DomainAgent.Create(
         Guid.NewGuid(),
         Guid.NewGuid(),
         "Agent",
         "HOST",
         "Windows",
         "1.0.0",
-        new string('a', Agent.CredentialHashLength),
+        new string('a', DomainAgent.CredentialHashLength),
         RegisteredAt);
 }

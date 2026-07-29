@@ -36,6 +36,13 @@ take effect without waiting for an access-token lifetime.
 - Log registration, rejection, revocation and heartbeat authorization failures with
   correlation/resource identifiers but never log installation tokens, Agent credentials
   or their hashes.
+- On its first console start, the Windows Agent validates typed API, identity and future
+  loop-interval configuration before any hosted background service starts. It sends the
+  one-time installation token only when no local credential exists, then persists the
+  returned Agent ID, `Agent` scheme and credential atomically in the current user's
+  `%LOCALAPPDATA%\ServerPilot\agent-credential.dat` file protected with Windows DPAPI
+  (`CurrentUser` scope). Later starts reuse that credential and do not need or log the
+  installation token.
 
 ## Alternatives considered
 
@@ -53,6 +60,13 @@ take effect without waiting for an access-token lifetime.
   comes from authentication and client clocks are not an availability authority.
 - Persist an `is_online` flag maintained by a background job: rejected because it adds
   writes and scheduling failure modes for state that can be derived deterministically.
+- Store the credential in `appsettings.json` or an environment variable permanently:
+  rejected because both are routinely copied into diagnostics, deployment manifests or
+  process inspection output. The one-time installation token is accepted only from
+  external configuration on first start.
+- Use a plaintext file: rejected because local file disclosure would immediately expose
+  a long-lived bearer credential. Windows DPAPI is available without adding a separate
+  secret-management service and is sufficient for this Windows-only MVP Agent.
 
 ## Consequences
 
@@ -69,6 +83,10 @@ take effect without waiting for an access-token lifetime.
 - Availability reads use one configurable threshold and one captured server timestamp,
   so every item in a list is evaluated consistently. Clock synchronization remains an
   operational requirement for the API host.
+- The credential is bound to the Windows user profile that registered the Agent. Moving
+  the Agent to a different user or machine requires a new installation token and
+  registration; Windows Service account support is deferred to issue #37. DPAPI does
+  not protect against malicious code running as that same Windows user.
 
 ## Verification evidence
 
@@ -80,3 +98,5 @@ take effect without waiting for an access-token lifetime.
 - Heartbeat integration tests prove exact authenticated-Agent matching, server UTC,
   monotonic concurrent updates, owner-only queries and both sides of the availability
   threshold boundary.
+- Agent unit tests prove typed configuration validation plus first-run registration,
+  durable credential handoff and existing-credential reuse without an installation token.
