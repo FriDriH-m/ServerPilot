@@ -83,39 +83,12 @@ finally {
         [EnvironmentVariableTarget]::Process)
 }
 
-$previousPostgreSqlPassword = [Environment]::GetEnvironmentVariable(
-    "POSTGRES_PASSWORD",
-    [EnvironmentVariableTarget]::Process)
-$previousJwtSigningKey = [Environment]::GetEnvironmentVariable(
-    "JWT_SIGNING_KEY",
-    [EnvironmentVariableTarget]::Process)
-try {
-    [Environment]::SetEnvironmentVariable(
-        "POSTGRES_PASSWORD",
-        "verify-only-postgresql-password",
-        [EnvironmentVariableTarget]::Process)
-    [Environment]::SetEnvironmentVariable(
-        "JWT_SIGNING_KEY",
-        "verify-only-jwt-signing-key-with-32-bytes",
-        [EnvironmentVariableTarget]::Process)
-
-    docker compose config --quiet
-    Assert-NativeCommandSucceeded "docker compose config"
-
-    if (-not $SkipDockerBuild) {
-        docker compose build api
-        Assert-NativeCommandSucceeded "docker compose build api"
-    }
+if ($SkipDockerBuild) {
+    & "$PSScriptRoot/verify-compose.ps1" -SkipBuild
 }
-finally {
-    [Environment]::SetEnvironmentVariable(
-        "POSTGRES_PASSWORD",
-        $previousPostgreSqlPassword,
-        [EnvironmentVariableTarget]::Process)
-    [Environment]::SetEnvironmentVariable(
-        "JWT_SIGNING_KEY",
-        $previousJwtSigningKey,
-        [EnvironmentVariableTarget]::Process)
+else {
+    & "$PSScriptRoot/verify-compose.ps1"
 }
+Assert-NativeCommandSucceeded "Compose verification"
 
 Write-Host "ServerPilot verification completed successfully."

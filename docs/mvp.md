@@ -493,6 +493,18 @@ PostgreSQL
 ServerPilot.Api
 ```
 
+Compose также запускает одноразовый `migrate` service из того же Dockerfile. Он ждёт
+healthy PostgreSQL, выполняет EF Core migrations и завершается; API зависит от его
+успешного завершения. Ошибка миграции не маскируется restart loop и не позволяет API
+стартовать. `/health/live` означает только работающий API process, а `/health/ready`
+дополнительно требует доступный PostgreSQL без pending migrations.
+
+Database volume сохраняет локальные данные между `docker compose down` и следующим
+запуском. `docker compose down --volumes --remove-orphans` является явным destructive
+reset для локальной разработки; следующий `up -d --build` создаёт чистую базу и применяет
+все migrations. Windows Agent не контейнеризуется и в локальном сценарии использует
+loopback API URL.
+
 Agent запускается непосредственно на Windows, а не в Docker.
 
 Frontend пока необязателен. Основные сценарии можно проверить через HTTP-клиент.

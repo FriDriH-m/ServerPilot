@@ -219,6 +219,7 @@ API
 - [`docs/adr/0008-safe-local-process-supervision.md`](docs/adr/0008-safe-local-process-supervision.md) — решение по безопасной границе запуска и остановки локального процесса.
 - [`docs/adr/0009-idempotent-agent-command-execution.md`](docs/adr/0009-idempotent-agent-command-execution.md) — решение по staged-выполнению команд и retry без повторения process action.
 - [`docs/adr/0010-agent-process-state-reconciliation.md`](docs/adr/0010-agent-process-state-reconciliation.md) — решение по Agent-authoritative process state, safe restart rediscovery и offline semantics.
+- [`docs/adr/0011-compose-migration-startup.md`](docs/adr/0011-compose-migration-startup.md) — решение по one-shot Compose migrations, readiness и clean reset.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -248,10 +249,39 @@ $generator.Dispose()
 `JWT_SIGNING_KEY`. API дополнительно отклоняет публичное placeholder-значение, даже
 если оно формально длиннее 32 байт.
 
-Запустите API и PostgreSQL:
+Запустите API, PostgreSQL и одноразовый migration service:
 
 ```bash
-docker compose up -d
+docker compose up -d --build
+```
+
+`migrate` ждёт healthy PostgreSQL, применяет EF Core migrations один раз и должен
+завершиться успешно до запуска API. При ошибке миграции API намеренно не запускается;
+исправьте причину, изучите `docker compose logs migrate` и повторите команду. API считается
+готовым только после `GET /health/ready`; `GET /health/live` проверяет лишь работающий
+процесс. Для проверки используйте:
+
+```powershell
+Invoke-WebRequest http://127.0.0.1:8080/health/live
+Invoke-WebRequest http://127.0.0.1:8080/health/ready
+```
+
+Порт API опубликован только на loopback и по умолчанию равен `8080`; при конфликте задайте
+`SERVERPILOT_API_HOST_PORT`. Windows Agent в локальном Compose-сценарии подключается к
+`http://127.0.0.1:8080/`. Для не-loopback deployment требуется HTTPS.
+
+Остановить окружение без удаления данных:
+
+```bash
+docker compose down
+```
+
+Полностью удалить локальные данные и на следующем запуске применить все миграции к чистой
+базе:
+
+```bash
+docker compose down --volumes --remove-orphans
+docker compose up -d --build
 ```
 
 Сборка проекта:
@@ -534,8 +564,9 @@ dotnet ef database update --project src/ServerPilot.Infrastructure --startup-pro
 
 `/health/live` проверяет только работу процесса API. `/health/ready` и совместимый
 `/health` дополнительно требуют доступный PostgreSQL без неприменённых миграций.
-До завершения #32 миграции применяются явно приведённой выше командой; readiness не
-позволяет ошибочно считать чистую базу готовой.
+Compose применяет миграции отдельным one-shot service; readiness не позволяет ошибочно
+считать базу с неприменённой схемой готовой. `./eng/verify-compose.ps1` проверяет clean
+startup, `/health/ready`, историю миграций и reset с удалением volume.
 
 ## Статус проекта
 
