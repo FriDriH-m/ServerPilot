@@ -216,6 +216,7 @@ API
 - [`docs/adr/0005-active-server-command-uniqueness.md`](docs/adr/0005-active-server-command-uniqueness.md) — решение по единственной активной команде для ServerInstance.
 - [`docs/adr/0006-postgresql-command-claiming.md`](docs/adr/0006-postgresql-command-claiming.md) — решение по атомарной выдаче команд Agent через PostgreSQL.
 - [`docs/adr/0007-agent-heartbeat-and-command-polling.md`](docs/adr/0007-agent-heartbeat-and-command-polling.md) — решение по Agent heartbeat, polling и ограниченным retry.
+- [`docs/adr/0008-safe-local-process-supervision.md`](docs/adr/0008-safe-local-process-supervision.md) — решение по безопасной границе запуска и остановки локального процесса.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -374,7 +375,20 @@ Agent ID сохраняется атомарно в
 
 После `claim-next` Agent удерживает одну команду в памяти и не забирает следующую до
 появления executor в #29. Он пока не запускает локальный процесс и не отправляет
-transition: это остаётся задачами #28 и #29.
+transition: подключение уже реализованного supervisor остаётся задачей #29.
+
+### Безопасный process supervisor Agent
+
+Supervisor принимает только заранее сохранённую конфигурацию нативного `.exe`, повторно
+проверяет абсолютные Windows/UNC-пути и существование executable/working directory на
+локальной машине, затем запускает процесс с `UseShellExecute = false`. Shell, PowerShell,
+`.bat` и executable path из payload команды не используются.
+
+Agent отслеживает PID вместе с UTC-временем запуска, фактическим путём и именем процесса.
+Перед каждой остановкой identity проверяется заново: stale/reused PID не получает signal.
+Сначала предпринимается graceful stop с ограниченным ожиданием, после чего допустим
+явный принудительный fallback с отдельным timeout и структурированным логом без путей и
+аргументов. Командный polling будет связан с supervisor в #29.
 
 ### Heartbeat и доступность Agent
 
@@ -496,7 +510,7 @@ dotnet ef database update --project src/ServerPilot.Infrastructure --startup-pro
 одноразовые Agent installation tokens, регистрация, отдельная аутентификация, heartbeat,
 пользовательские Agent queries, ServerInstance configuration/ownership, пользовательские
 Start/Stop endpoints, история ServerCommand и Agent endpoints атомарной выдачи, прогресса
-и результата команд. Реализованы функциональные задачи #25, #26 и #27. Agent теперь
+и результата команд. Реализованы функциональные задачи #25, #26, #27 и #28. Agent теперь
 валидирует typed configuration до запуска фоновых циклов, регистрируется по installation
 token только при первом запуске и хранит выданный credential в Windows DPAPI-защищённом
 local storage текущего пользователя, отправляет heartbeat и последовательно получает
@@ -506,7 +520,11 @@ hardening-исправления: безопасная проверка Windows-
 claim-response, cursor pagination истории, защита переходов при регрессии часов и
 PostgreSQL-инвариант одной `Claimed`/`Running` команды на Agent.
 
-Следующая задача — #28: безопасный process supervisor. После неё #29 добавит
-идемпотентное выполнение StartServer/StopServer к уже работающему polling loop.
+Локальный process supervisor дополнительно проверяет сохранённую конфигурацию на Windows,
+не использует shell, предотвращает повторный запуск, сверяет полную identity процесса
+перед остановкой и применяет ограниченный forced fallback только после graceful attempt.
+
+Следующая задача — #29: идемпотентное выполнение StartServer/StopServer, связывающее
+работающий polling loop с безопасным process supervisor.
 
 Текущая цель — реализовать минимальный рабочий вертикальный сценарий без преждевременного добавления сложной инфраструктуры.

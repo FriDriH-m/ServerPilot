@@ -29,6 +29,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ServerPilot.IntegrationTests/ServerPilot.IntegrationTests.csproj" />
+    <Project Path="tests/ServerPilot.ProcessFixture/ServerPilot.ProcessFixture.csproj" />
     <Project Path="tests/ServerPilot.UnitTests/ServerPilot.UnitTests.csproj" />
   </Folder>
 </Solution>
