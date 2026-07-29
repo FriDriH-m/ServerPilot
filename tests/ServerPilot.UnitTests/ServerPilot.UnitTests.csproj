@@ -16,5 +16,7 @@
     <ProjectReference Include="../../src/ServerPilot.Application/ServerPilot.Application.csproj" />
     <ProjectReference Include="../../src/ServerPilot.Domain/ServerPilot.Domain.csproj" />
     <ProjectReference Include="../../src/ServerPilot.Infrastructure/ServerPilot.Infrastructure.csproj" />
+    <ProjectReference Include="../ServerPilot.ProcessFixture/ServerPilot.ProcessFixture.csproj"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>
