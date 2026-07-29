@@ -373,6 +373,17 @@ POST /api/commands/{commandId}/complete
 POST /api/commands/{commandId}/fail
 ```
 
+`claim-next` доступен только Agent credential, чей Agent ID точно совпадает с маршрутом.
+Он одним коротким PostgreSQL statement выбирает старейшую `Pending`-команду и переводит
+её в `Claimed`; параллельные запросы не могут получить один command ID. Пустая очередь
+возвращает `204`.
+
+Переходы результата также авторизуются по Agent ID команды: `Claimed -> Running`,
+`Running -> Completed` и `Running -> Failed`. Повтор уже применённого progress/result
+идемпотентен, если его смысл и failure details совпадают; конфликтующий или невозможный
+переход возвращает общий Problem Details с `409`. Failure details обязательны и
+ограничены, а сырое сообщение не возвращается пользовательскому API и не логируется.
+
 Точные маршруты могут измениться после обсуждения API, но поведение должно сохраниться.
 
 ## Тесты MVP
