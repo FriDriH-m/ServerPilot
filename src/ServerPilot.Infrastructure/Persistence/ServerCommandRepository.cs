@@ -78,37 +78,61 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
                           command.error_code,
                           command.attempt_count,
                           command.correlation_id
+            ),
+            delivered_command AS
+            (
+                SELECT active_command.id,
+                       active_command.agent_id,
+                       active_command.server_instance_id,
+                       active_command.type,
+                       active_command.status,
+                       active_command.created_at,
+                       active_command.claimed_at,
+                       active_command.started_at,
+                       active_command.completed_at,
+                       active_command.error_code,
+                       active_command.attempt_count,
+                       active_command.correlation_id,
+                       TRUE AS is_recovery
+                FROM active_command
+                UNION ALL
+                SELECT claimed_command.id,
+                       claimed_command.agent_id,
+                       claimed_command.server_instance_id,
+                       claimed_command.type,
+                       claimed_command.status,
+                       claimed_command.created_at,
+                       claimed_command.claimed_at,
+                       claimed_command.started_at,
+                       claimed_command.completed_at,
+                       claimed_command.error_code,
+                       claimed_command.attempt_count,
+                       claimed_command.correlation_id,
+                       FALSE AS is_recovery
+                FROM claimed_command
+                LIMIT 1
             )
-            SELECT active_command.id,
-                   active_command.agent_id,
-                   active_command.server_instance_id,
-                   active_command.type,
-                   active_command.status,
-                   active_command.created_at,
-                   active_command.claimed_at,
-                   active_command.started_at,
-                   active_command.completed_at,
-                   active_command.error_code,
-                   active_command.attempt_count,
-                   active_command.correlation_id,
-                   TRUE AS is_recovery
-            FROM active_command
-            UNION ALL
-            SELECT claimed_command.id,
-                   claimed_command.agent_id,
-                   claimed_command.server_instance_id,
-                   claimed_command.type,
-                   claimed_command.status,
-                   claimed_command.created_at,
-                   claimed_command.claimed_at,
-                   claimed_command.started_at,
-                   claimed_command.completed_at,
-                   claimed_command.error_code,
-                   claimed_command.attempt_count,
-                   claimed_command.correlation_id,
-                   FALSE AS is_recovery
-            FROM claimed_command
-            LIMIT 1
+            SELECT delivered_command.id,
+                   delivered_command.agent_id,
+                   delivered_command.server_instance_id,
+                   delivered_command.type,
+                   delivered_command.status,
+                   delivered_command.created_at,
+                   delivered_command.claimed_at,
+                   delivered_command.started_at,
+                   delivered_command.completed_at,
+                   delivered_command.error_code,
+                   delivered_command.attempt_count,
+                   delivered_command.correlation_id,
+                   delivered_command.is_recovery,
+                   server_instance.executable_path,
+                   server_instance.arguments,
+                   server_instance.working_directory,
+                   server_instance.process_name
+            FROM delivered_command
+            INNER JOIN server_instances AS server_instance
+                ON server_instance.id = delivered_command.server_instance_id
+               AND server_instance.agent_id = delivered_command.agent_id
             """;
 
         DbConnection connection = dbContext.Database.GetDbConnection();
@@ -191,7 +215,12 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
         AgentCommandDeliveryKind deliveryKind = reader.GetBoolean(12)
             ? AgentCommandDeliveryKind.Recovery
             : AgentCommandDeliveryKind.New;
-        return new ClaimedServerCommandDetails(details, deliveryKind);
+        ServerInstanceExecutionDetails serverInstance = new(
+            reader.GetString(13),
+            reader.GetString(14),
+            reader.GetString(15),
+            reader.GetString(16));
+        return new ClaimedServerCommandDetails(details, deliveryKind, serverInstance);
     }
 
     public async Task<AgentCommandTransitionStatus> StartAsync(

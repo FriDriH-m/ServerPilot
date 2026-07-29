@@ -1,6 +1,7 @@
 using ServerPilot.Agent.Api;
 using ServerPilot.Agent.Configuration;
 using ServerPilot.Agent.Credentials;
+using ServerPilot.Agent.Execution;
 
 namespace ServerPilot.Agent.Looping;
 
@@ -9,9 +10,10 @@ public sealed class AgentLoopService(
     IAgentApiClient apiClient,
     AgentRetryExecutor retry,
     PeriodicAgentLoop periodicLoop,
+    IAgentCommandExecutor commandExecutor,
     ILogger<AgentLoopService> logger)
 {
-    private ClaimedAgentCommand? activeCommand;
+    private AgentCommandExecution? activeCommand;
 
     private static readonly Action<ILogger, Guid, int, Exception?> LogTransientFailure =
         LoggerMessage.Define<Guid, int>(
@@ -104,28 +106,38 @@ public sealed class AgentLoopService(
         TaskCompletionSource<AgentApiException> fatalFailure,
         CancellationToken cancellationToken)
     {
-        if (Volatile.Read(ref activeCommand) is not null)
-        {
-            return true;
-        }
-
         try
         {
-            ClaimedAgentCommand? command = await retry.ExecuteAsync(
-                token => apiClient.ClaimNextCommandAsync(credential, token),
-                cancellationToken);
-            if (command is not null &&
-                Interlocked.CompareExchange(ref activeCommand, command, null) is null)
+            AgentCommandExecution? execution = Volatile.Read(ref activeCommand);
+            if (execution is null)
             {
-                LogCommandReserved(
-                    logger,
-                    credential.AgentId,
-                    command.Id,
-                    command.CorrelationId,
-                    command.DeliveryKind,
-                    null);
+                ClaimedAgentCommand? command = await retry.ExecuteAsync(
+                    token => apiClient.ClaimNextCommandAsync(credential, token),
+                    cancellationToken);
+                if (command is null)
+                {
+                    return true;
+                }
+
+                AgentCommandExecution newExecution = new(command);
+                execution = Interlocked.CompareExchange(
+                    ref activeCommand,
+                    newExecution,
+                    null) ?? newExecution;
+                if (ReferenceEquals(execution, newExecution))
+                {
+                    LogCommandReserved(
+                        logger,
+                        credential.AgentId,
+                        command.Id,
+                        command.CorrelationId,
+                        command.DeliveryKind,
+                        null);
+                }
             }
 
+            await commandExecutor.ExecuteAsync(credential, execution, cancellationToken);
+            Interlocked.CompareExchange(ref activeCommand, null, execution);
             return true;
         }
         catch (AgentRetryExhaustedException exception)

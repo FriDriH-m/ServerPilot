@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using ServerPilot.Agent.Api;
 using ServerPilot.Agent.Configuration;
 using ServerPilot.Agent.Credentials;
+using ServerPilot.Agent.Execution;
 using ServerPilot.Agent.Looping;
 
 namespace ServerPilot.UnitTests.AgentLooping;
@@ -12,14 +13,15 @@ public sealed class AgentLoopServiceTests
     [Fact]
     public async Task HoldsOneClaimedCommandInsteadOfPollingForAnother()
     {
-        BlockingAgentDelay delay = new(requiredEntries: 2);
+        BlockingAgentDelay delay = new(requiredEntries: 1);
         RecordingAgentApiClient apiClient = new(CreateCommand());
-        AgentLoopService service = CreateService(apiClient, delay);
+        BlockingCommandExecutor executor = new();
+        AgentLoopService service = CreateService(apiClient, delay, executor);
         using CancellationTokenSource cancellation = new();
 
         Task running = service.RunAsync(CreateCredential(), cancellation.Token);
         await apiClient.CommandClaimed.Task;
-        await delay.RequiredEntriesReached.Task;
+        await executor.ExecutionStarted.Task;
 
         Assert.Equal(1, apiClient.ClaimCalls);
 
@@ -41,7 +43,10 @@ public sealed class AgentLoopServiceTests
         Assert.Equal(1, apiClient.HeartbeatCalls);
     }
 
-    private static AgentLoopService CreateService(IAgentApiClient apiClient, IAgentDelay delay)
+    private static AgentLoopService CreateService(
+        IAgentApiClient apiClient,
+        IAgentDelay delay,
+        IAgentCommandExecutor? commandExecutor = null)
     {
         AgentOptions options = new()
         {
@@ -57,6 +62,7 @@ public sealed class AgentLoopServiceTests
             apiClient,
             new AgentRetryExecutor(delay),
             new PeriodicAgentLoop(delay),
+            commandExecutor ?? new BlockingCommandExecutor(),
             NullLogger<AgentLoopService>.Instance);
     }
 
@@ -68,9 +74,14 @@ public sealed class AgentLoopServiceTests
     private static ClaimedAgentCommand CreateCommand() => new(
         Guid.NewGuid(),
         Guid.NewGuid(),
-        "StartServer",
+        AgentCommandType.StartServer,
         Guid.NewGuid(),
-        "New");
+        "New",
+        new ClaimedAgentServerInstance(
+            @"C:\Servers\server.exe",
+            string.Empty,
+            @"C:\Servers",
+            "server"));
 
     private sealed class RecordingAgentApiClient(ClaimedAgentCommand command) : IAgentApiClient
     {
@@ -90,6 +101,23 @@ public sealed class AgentLoopServiceTests
             CommandClaimed.TrySetResult(true);
             return Task.FromResult<ClaimedAgentCommand?>(command);
         }
+
+        public Task MarkCommandRunningAsync(
+            AgentCredential credential,
+            ClaimedAgentCommand command,
+            CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task CompleteCommandAsync(
+            AgentCredential credential,
+            ClaimedAgentCommand command,
+            CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task FailCommandAsync(
+            AgentCredential credential,
+            ClaimedAgentCommand command,
+            string errorCode,
+            string errorMessage,
+            CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class AuthenticationFailingAgentApiClient : IAgentApiClient
@@ -106,6 +134,38 @@ public sealed class AgentLoopServiceTests
             AgentCredential credential,
             CancellationToken cancellationToken) =>
             Task.FromResult<ClaimedAgentCommand?>(null);
+
+        public Task MarkCommandRunningAsync(
+            AgentCredential credential,
+            ClaimedAgentCommand command,
+            CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task CompleteCommandAsync(
+            AgentCredential credential,
+            ClaimedAgentCommand command,
+            CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task FailCommandAsync(
+            AgentCredential credential,
+            ClaimedAgentCommand command,
+            string errorCode,
+            string errorMessage,
+            CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class BlockingCommandExecutor : IAgentCommandExecutor
+    {
+        public TaskCompletionSource<bool> ExecutionStarted { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task ExecuteAsync(
+            AgentCredential credential,
+            AgentCommandExecution execution,
+            CancellationToken cancellationToken)
+        {
+            ExecutionStarted.TrySetResult(true);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
     }
 
     private sealed class BlockingAgentDelay(int requiredEntries) : IAgentDelay

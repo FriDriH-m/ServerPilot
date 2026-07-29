@@ -26,7 +26,8 @@ may still refer to it.
   MVP operation because it could change the machine and ownership context of a process
   configuration unexpectedly.
 - Return a safe summary from list queries. Full local paths and arguments are returned
-  only to the owner from create, get-by-ID and update operations.
+  to the owner from create, get-by-ID and update operations, and to the authenticated
+  target Agent only with its atomically claimed command.
 - Reject changes to executable path, arguments, working directory or process name while
   the instance has an active process state or a `Pending`, `Claimed` or `Running`
   command. A name-only update remains allowed. Serialize that check with command creation
@@ -56,9 +57,10 @@ may still refer to it.
 
 - The API validates shape rather than remote file existence. A future Agent must still
   validate that the stored configuration is safe and executable in its local context.
-- The user who owns an Agent can retrieve the full configuration; this is intentional
-  because they supplied it, but API logs and list responses do not contain the paths or
-  arguments.
+- The user who owns an Agent and that Agent's authenticated command executor can retrieve
+  the full configuration; this is intentional because they are the configuration source
+  and execution target. API logs, list responses and command history do not contain the
+  paths or arguments.
 - The conditional delete protects against a status becoming active between an earlier
   read and the deletion attempt. A concurrent inactive-to-active transition after a
   successful delete must fail when later command-state work verifies the instance still

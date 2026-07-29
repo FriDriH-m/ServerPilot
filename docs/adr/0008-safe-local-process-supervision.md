@@ -8,9 +8,9 @@ Windows execution boundary. A stale or reused PID, an executable path that resol
 script, or a stop request racing with process exit could otherwise start arbitrary code
 or terminate an unrelated process.
 
-The supervisor is intentionally independent from command orchestration. Issue #29 will
-map an authenticated, claimed command and its stored ServerInstance configuration to
-this component.
+The supervisor remains independent from command orchestration. Issue #29 maps an
+authenticated, claimed command and its stored ServerInstance configuration to this
+component through a per-ServerInstance registry.
 
 ## Decision
 
@@ -49,8 +49,8 @@ this component.
   identity checks live only in the Windows Agent.
 - Existing `.bat`-shaped ServerInstance data is rejected safely by this supervisor. The
   Project Zomboid profile remains deferred and must not silently introduce shell input.
-- The supervisor tracks the full identity in memory. Durable command execution and
-  persisted process-state reconciliation remain issues #29 and #30.
+- The supervisor tracks the full identity in memory. Restart rediscovery and persisted
+  process-state reconciliation remain issue #30.
 - A console process has no graceful window signal, so it reaches the logged, bounded
   forced fallback.
 

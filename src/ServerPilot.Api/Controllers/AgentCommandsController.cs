@@ -159,6 +159,11 @@ public sealed class AgentCommandsController(
             command.ErrorCode,
             command.AttemptCount,
             command.CorrelationId,
-            delivery.DeliveryKind.ToString());
+            delivery.DeliveryKind.ToString(),
+            new AgentServerInstanceConfigurationResponse(
+                delivery.ServerInstance.ExecutablePath,
+                delivery.ServerInstance.Arguments,
+                delivery.ServerInstance.WorkingDirectory,
+                delivery.ServerInstance.ProcessName));
     }
 }

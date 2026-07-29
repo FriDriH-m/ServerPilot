@@ -13,4 +13,11 @@ public sealed record AgentServerCommandResponse(
     string? ErrorCode,
     int AttemptCount,
     Guid CorrelationId,
-    string DeliveryKind);
+    string DeliveryKind,
+    AgentServerInstanceConfigurationResponse ServerInstance);
+
+public sealed record AgentServerInstanceConfigurationResponse(
+    string ExecutablePath,
+    string Arguments,
+    string WorkingDirectory,
+    string ProcessName);

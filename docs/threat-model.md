@@ -5,8 +5,8 @@ boundary. It currently covers user authentication, one-time Agent installation t
 Agent registration, revocable Agent credentials, Windows DPAPI-protected local Agent
 credential storage, authenticated heartbeat/polling loops, persisted ServerInstance
 process configuration, owner-created ServerCommand history and Agent-authenticated
-command claim/result updates, and the Windows Agent local-process supervisor. Command
-orchestration will connect to the supervisor in issue #29.
+command claim/result updates, the Windows Agent local-process supervisor and the staged,
+idempotent command executor. Restart reconciliation remains in issue #30.
 
 ## Data flow and trust boundaries
 
@@ -53,6 +53,7 @@ User/client -> ASP.NET Core API -> PostgreSQL: owner-scoped ServerCommand reques
 Registered Agent -> ASP.NET Core API -> PostgreSQL: claim/progress/result
   | Agent ID comes from the credential; route IDs must match it exactly
   | oldest Pending command is claimed by one atomic PostgreSQL statement
+  | response includes that command's stored ServerInstance process configuration
   | bounded failure details are stored; raw messages are not logged or returned to users
 
 Registered Agent runtime
@@ -61,7 +62,11 @@ Registered Agent runtime
   v
 ASP.NET Core API
 
-Process supervisor boundary (not connected to the command loop until #29)
+Agent command executor
+  | Running transition -> one local action -> actual-state inspection -> terminal report
+  | transient terminal-report failure reuses the cached local outcome, not the action
+  v
+Process supervisor boundary
   | stored native .exe configuration only; no shell or command-payload executable
   | PID + UTC start time + executable path + process name checked before every signal
   v
@@ -105,16 +110,18 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Lost claim response or overlapping Agent polls | Claim locks the Agent row, re-delivers its existing `Claimed`/`Running` command, and a partial unique index permits only one such command per Agent | Lease expiry, abandonment and reassignment are deferred |
 | Temporary API outage creates a request storm | Heartbeat and polling retry only transient network/408/429/5xx failures up to three times with bounded exponential delay and jitter, then return to their normal cadence | Repeated outages remain visible in Agent logs; no central circuit breaker exists in MVP |
 | Revoked credential or invalid Agent contract retries forever | `401`/`403`, unexpected `4xx` and malformed claim responses are classified as non-retryable; both loops stop and the Agent host exits visibly | Operator must correct configuration or register again after credential revocation |
-| One Agent processes multiple claimed commands concurrently | Each loop is sequential and the Agent holds one claimed/recovery command in memory before any later claim | Durable execution handoff and completion are deferred to #29 |
+| One Agent processes multiple claimed commands concurrently | The polling loop keeps one staged work item until its terminal report succeeds and does not claim another command meanwhile | Multi-command parallelism is intentionally outside the MVP |
 | Agent claims or updates another Agent's command | Claim route ID must equal the credential identity; every command update includes authenticated `agent_id`, and missing/foreign IDs both return `404` | A stolen credential retains its Agent authority until revoked |
 | Replayed, forged or clock-regressed command transition | Conditional updates require the exact predecessor state and nondecreasing timestamps; matching duplicates are idempotent and conflicts return `409` | API host clock synchronization remains an operational dependency |
+| Lost terminal result response repeats a process side effect | The work item records the verified local outcome before `/complete` or `/fail`; later transient retries send only the cached report | Agent restart before terminal reporting requires the recovery work in #30 |
+| Unknown or expanded command type reaches local execution | Claim deserialization accepts exact `StartServer` and `StopServer` values only; unsupported values stop at the protocol boundary | A future command type requires an explicit contract and executor decision |
 | Agent error discloses local details or exhausts storage | Failure code/message are required, trimmed and bounded; logs omit both details and user history omits the raw message | The Agent must use stable error codes and avoid unnecessary sensitive detail |
 | Command history disappears with its ServerInstance | ServerInstance deletion requires no persisted command history and otherwise returns `409` | Retention and archival policy are outside the MVP |
-| Local paths or launch arguments disclosed broadly | List responses and structured logs exclude paths and arguments; full configuration is returned only to the owning user | The owner can retrieve their configuration, so clients must protect their own API credentials |
+| Local paths or launch arguments disclosed broadly | List/history responses and structured logs exclude paths and arguments; full configuration is returned only to the owner and the authenticated target Agent with its claimed command | The owner and target Agent legitimately need the configuration and must protect their credentials |
 | Path traversal or an API-side path check targets the wrong machine | API validates bounded Windows/UNC path shape; Agent repeats safe absolute-path checks and verifies local executable/working-directory existence immediately before launch | Symlink/reparse-point policy is not expanded beyond the exact executable identity check in the MVP |
 | Stored configuration invokes a shell or script | The supervisor accepts a matching native `.exe` only and uses `UseShellExecute = false`; it never invokes `cmd.exe`, PowerShell or command-payload paths | Purpose-built game launchers require a separate bounded decision; `.bat` is rejected today |
 | Reused or stale PID terminates an unrelated process | Supervisor identity includes PID, UTC start time, executable path and normalized process name; identity is re-read immediately before graceful or forced signals | Durable recovery after Agent restart remains in #30 |
-| Hung process blocks Agent command execution indefinitely | Graceful and forced waits have separate bounds; forced fallback is explicit and logs only ServerInstance ID, PID and timeout | #29 must convert a final timeout into a bounded command failure |
+| Hung process blocks Agent command execution indefinitely | Graceful and forced waits have separate bounds; the executor converts a final timeout into a safe bounded command failure | Long-running command cancellation policy remains minimal in the MVP |
 | Active process configuration removed during management | Owner and inactive-state predicates are combined in one conditional delete; active states return `409` | A future command/state transition must handle a deleted inactive instance by verifying existence atomically |
 | Stored process configuration changes after a command is created | Process-critical updates return `409` while the process or a command is active; update and command creation serialize on the ServerInstance row | Configuration revisions and snapshots remain deferred |
 | Security operation has no audit trail | User/Agent registration, login, token operations and credential revocation emit structured events with identifiers but no credential values | Full API/Agent correlation remains in issue #31 |
@@ -142,6 +149,8 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
   authentication, configuration or contract failure indefinitely.
 - Do not overlap iterations of one Agent loop or claim another command while an in-memory
   command is reserved for sequential processing.
+- Record a local process outcome before terminal reporting and never repeat that process
+  action merely because its `/complete` or `/fail` response was lost.
 - Scope every Agent command transition by both command ID and authenticated Agent ID.
 - Reject invalid command transitions; accept only explicitly defined idempotent duplicates.
 - Never return a raw Agent command failure message to the user API.
@@ -149,6 +158,8 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 - Never expose ServerInstance executable paths, working directories or arguments in a list response or structured log.
 - A user cannot delete a ServerInstance while its persisted process state is active.
 - The Agent may execute only a stored ServerInstance configuration, never a command path or arguments supplied directly by a command request.
+- Return stored process configuration only to its owner or the authenticated target Agent
+  as part of that Agent's claimed command.
 - Never pass stored process configuration to a shell, PowerShell or `UseShellExecute`.
 - Never signal a PID until its start time, executable path and process name match the tracked identity.
 - Use HTTPS outside local development.

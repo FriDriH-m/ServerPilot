@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using ServerPilot.Agent.Api;
 using ServerPilot.Agent.Credentials;
 
@@ -47,6 +48,13 @@ public sealed class HttpAgentApiClientTests
                     Type = "StartServer",
                     CorrelationId = correlationId,
                     DeliveryKind = "New",
+                    ServerInstance = new
+                    {
+                        ExecutablePath = @"C:\Servers\server.exe",
+                        Arguments = "--port 16261",
+                        WorkingDirectory = @"C:\Servers",
+                        ProcessName = "server",
+                    },
                 }),
             });
         HttpAgentApiClient client = CreateClient(handler);
@@ -59,7 +67,66 @@ public sealed class HttpAgentApiClientTests
         Assert.Equal(commandId, command.Id);
         Assert.Equal(serverInstanceId, command.ServerInstanceId);
         Assert.Equal(correlationId, command.CorrelationId);
-        Assert.Equal("StartServer", command.Type);
+        Assert.Equal(AgentCommandType.StartServer, command.Type);
+        Assert.Equal(@"C:\Servers\server.exe", command.ServerInstance.ExecutablePath);
+    }
+
+    [Fact]
+    public async Task RejectsUnknownCommandTypeBeforeExecution()
+    {
+        AgentCredential credential = CreateCredential();
+        StubHttpMessageHandler handler = new(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new
+                {
+                    Id = Guid.NewGuid(),
+                    AgentId = credential.AgentId,
+                    ServerInstanceId = Guid.NewGuid(),
+                    Type = "RestartServer",
+                    CorrelationId = Guid.NewGuid(),
+                    DeliveryKind = "New",
+                    ServerInstance = new
+                    {
+                        ExecutablePath = @"C:\Servers\server.exe",
+                        Arguments = string.Empty,
+                        WorkingDirectory = @"C:\Servers",
+                        ProcessName = "server",
+                    },
+                }),
+            });
+        HttpAgentApiClient client = CreateClient(handler);
+
+        AgentApiException exception = await Assert.ThrowsAsync<AgentApiException>(
+            () => client.ClaimNextCommandAsync(credential, CancellationToken.None));
+
+        Assert.Equal(AgentApiFailureKind.Configuration, exception.FailureKind);
+    }
+
+    [Fact]
+    public async Task ReportsFailureWithCredentialAndCommandCorrelationId()
+    {
+        RecordingTransitionHandler handler = new();
+        HttpAgentApiClient client = CreateClient(handler);
+        AgentCredential credential = CreateCredential();
+        ClaimedAgentCommand command = CreateCommand();
+
+        await client.FailCommandAsync(
+            credential,
+            command,
+            "ExecutableNotFound",
+            "The local process operation failed.",
+            CancellationToken.None);
+
+        Assert.Equal(HttpMethod.Post, handler.Method);
+        Assert.Equal($"/api/commands/{command.Id}/fail", handler.RequestUri?.AbsolutePath);
+        Assert.Equal("Agent", handler.Authorization?.Scheme);
+        Assert.Equal(credential.Value, handler.Authorization?.Parameter);
+        Assert.Equal(command.CorrelationId.ToString("D"), handler.CorrelationId);
+        using JsonDocument body = JsonDocument.Parse(handler.Body!);
+        Assert.Equal(
+            "ExecutableNotFound",
+            body.RootElement.GetProperty("errorCode").GetString());
     }
 
     [Fact]
@@ -97,6 +164,18 @@ public sealed class HttpAgentApiClientTests
         "spac_0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
         AgentCredential.ExpectedAuthorizationScheme);
 
+    private static ClaimedAgentCommand CreateCommand() => new(
+        Guid.NewGuid(),
+        Guid.NewGuid(),
+        AgentCommandType.StartServer,
+        Guid.NewGuid(),
+        "New",
+        new ClaimedAgentServerInstance(
+            @"C:\Servers\server.exe",
+            string.Empty,
+            @"C:\Servers",
+            "server"));
+
     private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
         : HttpMessageHandler
     {
@@ -104,5 +183,32 @@ public sealed class HttpAgentApiClientTests
             HttpRequestMessage request,
             CancellationToken cancellationToken) =>
             Task.FromResult(responseFactory(request));
+    }
+
+    private sealed class RecordingTransitionHandler : HttpMessageHandler
+    {
+        public HttpMethod? Method { get; private set; }
+
+        public Uri? RequestUri { get; private set; }
+
+        public AuthenticationHeaderValue? Authorization { get; private set; }
+
+        public string? CorrelationId { get; private set; }
+
+        public string? Body { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Method = request.Method;
+            RequestUri = request.RequestUri;
+            Authorization = request.Headers.Authorization;
+            CorrelationId = request.Headers.GetValues("X-Correlation-ID").Single();
+            Body = request.Content is null
+                ? null
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        }
     }
 }
