@@ -16,6 +16,18 @@ public interface IAgentApiClient
         AgentProcessStateReport report,
         CancellationToken cancellationToken);
 
+    Task ReportServerInstanceStateAsync(
+        AgentCredential credential,
+        Guid serverInstanceId,
+        AgentProcessStateReport report,
+        Guid correlationId,
+        CancellationToken cancellationToken) =>
+        ReportServerInstanceStateAsync(
+            credential,
+            serverInstanceId,
+            report,
+            cancellationToken);
+
     Task<ClaimedAgentCommand?> ClaimNextCommandAsync(
         AgentCredential credential,
         CancellationToken cancellationToken);

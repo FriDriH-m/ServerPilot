@@ -135,7 +135,8 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Hung process blocks Agent command execution indefinitely | Graceful and forced waits have separate bounds; the executor converts a final timeout into a safe bounded command failure | Long-running command cancellation policy remains minimal in the MVP |
 | Active process configuration removed during management | Owner and inactive-state predicates are combined in one conditional delete; active states return `409` | A future command/state transition must handle a deleted inactive instance by verifying existence atomically |
 | Stored process configuration changes after a command is created | Process-critical updates return `409` while the process or a command is active; update and command creation serialize on the ServerInstance row | Configuration revisions and snapshots remain deferred |
-| Security operation has no audit trail | User/Agent registration, login, token operations and credential revocation emit structured events with identifiers but no credential values | Full API/Agent correlation remains in issue #31 |
+| Security operation or command lifecycle has no usable audit trail | User/Agent registration, login, token operations and credential revocation emit structured events with identifiers but no credential values; command creation, claim, execution, state report and result share the persisted command correlation ID | Central collection, retention and alerting remain outside the MVP |
+| Structured diagnostics disclose secrets or local configuration | Command scopes contain only IDs; log templates omit passwords, tokens, credentials, authorization headers, paths, launch arguments, request bodies and raw Agent failure details | Operators must restrict log-sink access and retention |
 
 ## Security invariants
 

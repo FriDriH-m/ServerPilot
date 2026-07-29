@@ -161,6 +161,24 @@ AttemptCount
 CorrelationId
 ```
 
+## Structured logging and correlation
+
+Each ServerCommand has a persisted UUID correlation ID. API command creation and claim,
+Agent execution, verified state reporting and terminal completion/failure log with the
+same command scope and the available User, Agent, ServerInstance and Command IDs.
+
+Expected validation and conflict responses remain normal HTTP Problem Details rather than
+unhandled errors. Ownership and process-operation denials are warnings; bounded transient
+network retries are warnings only after they are exhausted; unexpected Agent-loop failures
+are critical and unhandled API failures are errors. API and Agent startup/shutdown plus
+command lifecycle transitions are information-level events; routine heartbeat and
+reconciliation diagnostics are debug-level events.
+
+Logging is configured through the existing `Logging__LogLevel__Default` and category-level
+environment variables. Logs must not include request bodies, authorization headers,
+passwords, installation tokens, Agent credentials, executable paths, launch arguments or
+raw Agent failure details.
+
 ## Поддерживаемые команды
 
 В MVP поддерживаются только:

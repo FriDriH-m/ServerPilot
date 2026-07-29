@@ -389,6 +389,10 @@ Correlation ID, но не process action. Следующая команда не
 result не принят API. Успешный Start/Stop сначала отправляет проверенное состояние процесса,
 а затем terminal command result; потерянный state response повторяет только cached report.
 
+Сохранённый UUID `CorrelationId` команды добавляется в structured scope на API при создании
+и claim, в Agent при execution и в state/result reports. Он связывает lifecycle без записи
+credentials, request bodies, путей, аргументов запуска или raw failure details в логи.
+
 Command polling не начинается до первой успешной сверки после запуска Agent. Для ранее
 зафиксированного `Running` Agent восстанавливает supervisor из persisted PID и UTC-времени
 старта и принимает процесс только после совпадения полного identity. Периодическая проверка
@@ -539,7 +543,7 @@ dotnet ef database update --project src/ServerPilot.Infrastructure --startup-pro
 одноразовые Agent installation tokens, регистрация, отдельная аутентификация, heartbeat,
 пользовательские Agent queries, ServerInstance configuration/ownership, пользовательские
 Start/Stop endpoints, история ServerCommand и Agent endpoints атомарной выдачи, прогресса
-и результата команд. Реализованы функциональные задачи #25–#30. Agent теперь
+и результата команд. Реализованы функциональные задачи #25–#31. Agent теперь
 валидирует typed configuration до запуска фоновых циклов, регистрируется по installation
 token только при первом запуске и хранит выданный credential в Windows DPAPI-защищённом
 local storage текущего пользователя, отправляет heartbeat и последовательно получает

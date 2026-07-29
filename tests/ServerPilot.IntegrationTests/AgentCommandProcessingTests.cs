@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using ServerPilot.Api.Http;
 using ServerPilot.Application.Commands;
 using ServerPilot.Domain.Commands;
 using ServerPilot.Infrastructure.Persistence;
@@ -104,6 +105,55 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
         Assert.Equal(firstCommand.Id, recovered.Id);
         Assert.Equal(AgentCommandDeliveryKind.Recovery.ToString(), recovered.DeliveryKind);
         Assert.Equal(1, recovered.AttemptCount);
+    }
+
+    [Fact]
+    public async Task CommandLifecycleLogsUseTheStoredCommandCorrelationId()
+    {
+        AuthenticationResponse owner = await RegisterUserAsync("correlation-owner@example.com");
+        RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "Correlation Agent");
+        ServerInstanceResponse server = await CreateServerInstanceAsync(
+            owner.AccessToken,
+            agent.AgentId,
+            "Correlation Server");
+        ServerCommandResponse command = await CreateCommandAsync(
+            owner.AccessToken,
+            server.Id,
+            "start");
+
+        using HttpResponseMessage claim = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/agents/{agent.AgentId}/commands/claim-next");
+        using HttpResponseMessage start = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/commands/{command.Id}/start",
+            correlationId: command.CorrelationId);
+        using HttpResponseMessage complete = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/commands/{command.Id}/complete",
+            correlationId: command.CorrelationId);
+
+        Assert.Equal(HttpStatusCode.OK, claim.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, start.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, complete.StatusCode);
+
+        string correlationId = command.CorrelationId.ToString("D");
+        TestLogEntry[] correlatedEntries = logProvider.Entries
+            .Where(entry => entry.CorrelationId == correlationId)
+            .ToArray();
+        Assert.Contains(correlatedEntries, entry =>
+            entry.CategoryName.EndsWith("ServerCommandsController", StringComparison.Ordinal) &&
+            entry.Message.Contains(command.Id.ToString(), StringComparison.Ordinal));
+        Assert.Contains(correlatedEntries, entry =>
+            entry.CategoryName.EndsWith("AgentCommandsController", StringComparison.Ordinal) &&
+            entry.Message.Contains("received ServerCommand", StringComparison.Ordinal));
+        Assert.Equal(
+            2,
+            correlatedEntries.Count(entry =>
+                entry.CategoryName.EndsWith("AgentCommandsController", StringComparison.Ordinal) &&
+                entry.Message.Contains("applied transition", StringComparison.Ordinal)));
+        Assert.DoesNotContain(correlatedEntries, entry =>
+            entry.Message.Contains(agent.Credential, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -576,20 +626,28 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
     private Task<HttpResponseMessage> SendAgentPostAsync(
         string credential,
         string path,
-        object? body = null) =>
-        SendPostAsync("Agent", credential, path, body);
+        object? body = null,
+        Guid? correlationId = null) =>
+        SendPostAsync("Agent", credential, path, body, correlationId);
 
     private Task<HttpResponseMessage> SendPostAsync(
         string scheme,
         string credential,
         string path,
-        object? body)
+        object? body,
+        Guid? correlationId = null)
     {
         HttpRequestMessage request = new(HttpMethod.Post, path)
         {
             Content = body is null ? null : JsonContent.Create(body),
         };
         request.Headers.Authorization = new AuthenticationHeaderValue(scheme, credential);
+        if (correlationId.HasValue)
+        {
+            request.Headers.Add(
+                CorrelationIdMiddleware.HeaderName,
+                correlationId.Value.ToString("D"));
+        }
         return client.SendAsync(request, CancellationToken.None);
     }
 

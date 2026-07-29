@@ -15,11 +15,29 @@ public sealed class ServerCommandServiceTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             (ServerCommandType)999,
+            Guid.NewGuid(),
             CancellationToken.None);
 
         Assert.Equal(CreateServerCommandStatus.UnsupportedType, result.Status);
         Assert.Null(result.Command);
         Assert.Equal(0, repository.CreateCalls);
+    }
+
+    [Fact]
+    public async Task CreatePassesRequestCorrelationIdToRepository()
+    {
+        RecordingServerCommandRepository repository = new();
+        ServerCommandService service = new(repository, TimeProvider.System);
+        Guid correlationId = Guid.NewGuid();
+
+        await service.CreateAsync(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            ServerCommandType.StartServer,
+            correlationId,
+            CancellationToken.None);
+
+        Assert.Equal(correlationId, repository.CorrelationId);
     }
 
     [Theory]
@@ -45,6 +63,8 @@ public sealed class ServerCommandServiceTests
         public int CreateCalls { get; private set; }
 
         public int ListCalls { get; private set; }
+
+        public Guid? CorrelationId { get; private set; }
 
         public Task<ClaimedServerCommandDetails?> ClaimNextAsync(
             Guid agentId,
@@ -84,6 +104,7 @@ public sealed class ServerCommandServiceTests
             CancellationToken cancellationToken)
         {
             CreateCalls++;
+            CorrelationId = correlationId;
             return Task.FromResult(new CreateServerCommandResult(
                 CreateServerCommandStatus.ServerInstanceNotFound,
                 null));

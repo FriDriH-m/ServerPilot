@@ -67,16 +67,43 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
         }
     }
 
-    public async Task ReportServerInstanceStateAsync(
+    public Task ReportServerInstanceStateAsync(
         AgentCredential credential,
         Guid serverInstanceId,
         AgentProcessStateReport report,
+        CancellationToken cancellationToken) =>
+        SendServerInstanceStateAsync(
+            credential,
+            serverInstanceId,
+            report,
+            correlationId: null,
+            cancellationToken);
+
+    public Task ReportServerInstanceStateAsync(
+        AgentCredential credential,
+        Guid serverInstanceId,
+        AgentProcessStateReport report,
+        Guid correlationId,
+        CancellationToken cancellationToken) =>
+        SendServerInstanceStateAsync(
+            credential,
+            serverInstanceId,
+            report,
+            correlationId,
+            cancellationToken);
+
+    private async Task SendServerInstanceStateAsync(
+        AgentCredential credential,
+        Guid serverInstanceId,
+        AgentProcessStateReport report,
+        Guid? correlationId,
         CancellationToken cancellationToken)
     {
         using HttpRequestMessage request = CreateRequest(
             HttpMethod.Post,
             $"api/agents/{credential.AgentId}/server-instances/{serverInstanceId}/status",
-            credential);
+            credential,
+            correlationId);
         request.Content = JsonContent.Create(new
         {
             Status = report.Status.ToString(),

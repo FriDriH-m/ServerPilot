@@ -1,10 +1,12 @@
 using System.Net;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ServerPilot.Agent.Api;
 using ServerPilot.Agent.Credentials;
 using ServerPilot.Agent.Execution;
 using ServerPilot.Agent.Looping;
 using ServerPilot.Agent.Processes;
+using ServerPilot.UnitTests.Infrastructure;
 
 namespace ServerPilot.UnitTests.AgentExecution;
 
@@ -153,6 +155,45 @@ public sealed class AgentCommandExecutorTests
 
         Assert.Equal(["api:start", "api:fail"], events);
         Assert.Equal("InvalidProcessConfiguration", apiClient.ErrorCode);
+    }
+
+    [Fact]
+    public async Task CommandLifecycleLogsUseCommandCorrelationScope()
+    {
+        List<string> events = [];
+        RecordingApiClient apiClient = new(events);
+        FakeProcessSupervisor supervisor = new(events)
+        {
+            StartResult = new ProcessSupervisorResult(ProcessSupervisorStatus.Started),
+        };
+        supervisor.InspectionResults.Enqueue(
+            new ProcessSupervisorResult(
+                ProcessSupervisorStatus.Running,
+                CreateIdentity()));
+        TestLogProvider logProvider = new();
+        using ILoggerFactory loggerFactory = LoggerFactory.Create(logging =>
+            logging.AddProvider(logProvider));
+        AgentCommandExecutor executor = new(
+            apiClient,
+            new AgentRetryExecutor(new ImmediateDelay()),
+            new SuccessfulRegistry(supervisor),
+            loggerFactory.CreateLogger<AgentCommandExecutor>());
+        ClaimedAgentCommand command = CreateCommand(AgentCommandType.StartServer);
+
+        await executor.ExecuteAsync(
+            CreateCredential(),
+            new AgentCommandExecution(command),
+            CancellationToken.None);
+
+        TestLogEntry[] lifecycleEntries = logProvider.Entries
+            .Where(entry => entry.CategoryName.EndsWith(
+                nameof(AgentCommandExecutor),
+                StringComparison.Ordinal))
+            .ToArray();
+        Assert.NotEmpty(lifecycleEntries);
+        Assert.All(
+            lifecycleEntries,
+            entry => Assert.Equal(command.CorrelationId.ToString("D"), entry.CorrelationId));
     }
 
     private static AgentCommandExecutor CreateExecutor(

@@ -52,6 +52,20 @@
 
 Correlation ID предназначен для поиска связанных логов и не заменяет идентификаторы пользователя, Agent, ServerInstance или команды.
 
+### Command correlation
+
+При создании ServerCommand API генерирует и сохраняет отдельный UUID `CorrelationId`.
+Он добавляется в structured scope при создании и выдаче команды, передаётся Agent в
+claim response и возвращается в заголовке при state, start и terminal-result reports.
+Agent открывает command scope с `AgentId`, `ServerInstanceId`, `CommandId` и
+`CorrelationId`, поэтому логи supervisor и command lifecycle можно связать с одной
+сохранённой командой. Этот идентификатор не заменяет request-level
+`X-Correlation-ID` исходного пользовательского HTTP-запроса.
+
+Логи содержат только идентификаторы и безопасные коды. В них нельзя писать credentials,
+токены, authorization headers, пароли, пути, аргументы запуска, request bodies или raw
+failure details.
+
 ## Authentication schemes
 
 - Пользовательские endpoint принимают `Authorization: Bearer <jwt>` и получают user ID
