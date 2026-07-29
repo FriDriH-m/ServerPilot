@@ -1,5 +1,9 @@
+using System.Data;
+using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using ServerPilot.Application.ServerInstances;
+using ServerPilot.Domain.Commands;
 using ServerPilot.Domain.ServerInstances;
 using ServerInstanceEntity = ServerPilot.Domain.ServerInstances.ServerInstance;
 
@@ -61,23 +65,66 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
         ProjectDetails(OwnedByUser(userId).Where(serverInstance => serverInstance.Id == id))
             .SingleOrDefaultAsync(cancellationToken);
 
-    public async Task<ServerInstanceDetails?> UpdateOwnedAsync(
+    public async Task<UpdateServerInstanceResult> UpdateOwnedAsync(
         Guid id,
         Guid userId,
         ServerInstanceConfiguration configuration,
         DateTimeOffset updatedAt,
         CancellationToken cancellationToken)
     {
+        await using IDbContextTransaction transaction =
+            await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        if (!await LockOwnedServerInstanceAsync(id, userId, cancellationToken))
+        {
+            return new UpdateServerInstanceResult(UpdateServerInstanceStatus.NotFound, null);
+        }
+
         ServerInstanceEntity? serverInstance = await OwnedByUser(userId)
             .SingleOrDefaultAsync(serverInstance => serverInstance.Id == id, cancellationToken);
         if (serverInstance is null)
         {
-            return null;
+            return new UpdateServerInstanceResult(UpdateServerInstanceStatus.NotFound, null);
+        }
+
+        bool processConfigurationChanged =
+            !string.Equals(
+                serverInstance.ExecutablePath,
+                configuration.ExecutablePath,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                serverInstance.Arguments,
+                configuration.Arguments,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                serverInstance.WorkingDirectory,
+                configuration.WorkingDirectory,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                serverInstance.ProcessName,
+                configuration.ProcessName,
+                StringComparison.Ordinal);
+        if (processConfigurationChanged &&
+            (serverInstance.IsActive || await dbContext.ServerCommands
+                .AsNoTracking()
+                .AnyAsync(
+                    command =>
+                        command.ServerInstanceId == id &&
+                        (command.Status == ServerCommandStatus.Pending ||
+                         command.Status == ServerCommandStatus.Claimed ||
+                         command.Status == ServerCommandStatus.Running),
+                    cancellationToken)))
+        {
+            return new UpdateServerInstanceResult(
+                UpdateServerInstanceStatus.ActiveProcessOrCommand,
+                null);
         }
 
         serverInstance.UpdateConfiguration(configuration, updatedAt);
         await dbContext.SaveChangesAsync(cancellationToken);
-        return MapDetails(serverInstance);
+        await transaction.CommitAsync(cancellationToken);
+        return new UpdateServerInstanceResult(
+            UpdateServerInstanceStatus.Succeeded,
+            MapDetails(serverInstance));
     }
 
     public async Task<DeleteServerInstanceStatus> DeleteOwnedAsync(
@@ -130,6 +177,43 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
         dbContext.ServerInstances.Where(serverInstance =>
             dbContext.Agents.Any(agent =>
                 agent.Id == serverInstance.AgentId && agent.UserId == userId));
+
+    private async Task<bool> LockOwnedServerInstanceAsync(
+        Guid id,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        const string sql =
+            """
+            SELECT server_instance.id
+            FROM server_instances AS server_instance
+            INNER JOIN agents AS agent ON agent.id = server_instance.agent_id
+            WHERE server_instance.id = @id AND agent.user_id = @user_id
+            FOR UPDATE OF server_instance
+            """;
+
+        DbConnection connection = dbContext.Database.GetDbConnection();
+        await using DbCommand command = connection.CreateCommand();
+        command.Transaction = dbContext.Database.CurrentTransaction!.GetDbTransaction();
+        command.CommandText = sql;
+        AddParameter(command, "id", DbType.Guid, id);
+        AddParameter(command, "user_id", DbType.Guid, userId);
+        object? result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null and not DBNull;
+    }
+
+    private static void AddParameter(
+        DbCommand command,
+        string name,
+        DbType type,
+        object value)
+    {
+        DbParameter parameter = command.CreateParameter();
+        parameter.ParameterName = name;
+        parameter.DbType = type;
+        parameter.Value = value;
+        command.Parameters.Add(parameter);
+    }
 
     private static IQueryable<ServerInstanceDetails> ProjectDetails(
         IQueryable<ServerInstanceEntity> query) =>

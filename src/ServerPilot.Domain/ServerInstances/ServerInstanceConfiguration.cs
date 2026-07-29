@@ -75,42 +75,13 @@ public sealed class ServerInstanceConfiguration
             return false;
         }
 
-        if (normalizedValue.StartsWith("\\\\?\\", StringComparison.Ordinal) ||
-            normalizedValue.StartsWith("\\\\.\\", StringComparison.Ordinal))
-        {
-            normalizedValue = string.Empty;
-            return false;
-        }
-
-        bool isDriveRooted = normalizedValue.Length >= 3 &&
-            ((normalizedValue[0] >= 'A' && normalizedValue[0] <= 'Z') ||
-             (normalizedValue[0] >= 'a' && normalizedValue[0] <= 'z')) &&
-            normalizedValue[1] == ':' &&
-            (normalizedValue[2] == '\\' || normalizedValue[2] == '/');
-        bool isUncPath = (normalizedValue.StartsWith("\\\\", StringComparison.Ordinal) ||
-                          normalizedValue.StartsWith("//", StringComparison.Ordinal)) &&
-            HasUncServerAndShare(normalizedValue);
-        if (!isDriveRooted && !isUncPath)
-        {
-            normalizedValue = string.Empty;
-            return false;
-        }
-
-        if (normalizedValue.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries)
-            .Any(segment => segment is "." or ".."))
+        if (!WindowsPathSyntax.IsSafeAbsolutePath(normalizedValue))
         {
             normalizedValue = string.Empty;
             return false;
         }
 
         return true;
-    }
-
-    private static bool HasUncServerAndShare(string path)
-    {
-        string remainder = path[2..];
-        int serverSeparator = remainder.IndexOfAny(['\\', '/']);
-        return serverSeparator > 0 && serverSeparator < remainder.Length - 1;
     }
 
     private static bool TryNormalizeProcessName(

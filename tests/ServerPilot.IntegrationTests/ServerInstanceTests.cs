@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using ServerPilot.Domain.Commands;
 using ServerPilot.Domain.ServerInstances;
 using ServerPilot.Infrastructure.Persistence;
 using ServerPilot.IntegrationTests.Infrastructure;
@@ -131,6 +132,96 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
         Assert.Equal(HttpStatusCode.NotFound, foreignResponse.StatusCode);
     }
 
+    [Theory]
+    [InlineData("//?/C:/Servers/server.exe")]
+    [InlineData("//./C:/Servers/server.exe")]
+    [InlineData("\\/?/C:\\Servers/server.exe")]
+    [InlineData("\\\\\\share\\server.exe")]
+    [InlineData("\\\\server\\\\server.exe")]
+    public async Task CreateRejectsDeviceAndMalformedUncPathVariants(string executablePath)
+    {
+        AuthenticationResponse owner = await RegisterUserAsync($"path-{Guid.NewGuid():N}@example.com");
+        RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "Path Agent");
+
+        AuthorizeUser(owner.AccessToken);
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/server-instances",
+            CreateRequest(agent.AgentId) with { ExecutablePath = executablePath },
+            CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(ServerCommandStatus.Pending)]
+    [InlineData(ServerCommandStatus.Claimed)]
+    [InlineData(ServerCommandStatus.Running)]
+    public async Task ProcessConfigurationCannotChangeWhileCommandIsActive(
+        ServerCommandStatus commandStatus)
+    {
+        AuthenticationResponse owner = await RegisterUserAsync(
+            $"active-command-{commandStatus}@example.com");
+        RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "Command Agent");
+        AuthorizeUser(owner.AccessToken);
+        using HttpResponseMessage createResponse = await client.PostAsJsonAsync(
+            "/api/server-instances",
+            CreateRequest(agent.AgentId),
+            CancellationToken.None);
+        ServerInstanceResponse created =
+            (await createResponse.Content.ReadFromJsonAsync<ServerInstanceResponse>())!;
+
+        DateTimeOffset createdAt = TimeProvider.System.GetUtcNow();
+        ServerCommand command = ServerCommand.Create(
+            Guid.NewGuid(),
+            agent.AgentId,
+            created.Id,
+            ServerCommandType.StartServer,
+            createdAt,
+            Guid.NewGuid());
+        if (commandStatus is ServerCommandStatus.Claimed or ServerCommandStatus.Running)
+        {
+            Assert.True(command.TryClaim(createdAt.AddSeconds(1)));
+        }
+
+        if (commandStatus == ServerCommandStatus.Running)
+        {
+            Assert.True(command.TryStart(createdAt.AddSeconds(2)));
+        }
+
+        await using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())
+        {
+            ServerPilotDbContext dbContext =
+                scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+            dbContext.ServerCommands.Add(command);
+            await dbContext.SaveChangesAsync(CancellationToken.None);
+        }
+
+        AuthorizeUser(owner.AccessToken);
+        using HttpResponseMessage blocked = await client.PutAsJsonAsync(
+            $"/api/server-instances/{created.Id}",
+            CreateRequest(Guid.Empty) with
+            {
+                ExecutablePath = "C:\\Servers\\replacement.exe",
+            },
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+
+        using HttpResponseMessage nameOnly = await client.PutAsJsonAsync(
+            $"/api/server-instances/{created.Id}",
+            CreateRequest(Guid.Empty) with { Name = "Renamed Server" },
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.OK, nameOnly.StatusCode);
+
+        await using AsyncServiceScope verificationScope = factory.Services.CreateAsyncScope();
+        ServerPilotDbContext verificationContext =
+            verificationScope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+        ServerInstance persisted = await verificationContext.ServerInstances
+            .AsNoTracking()
+            .SingleAsync(item => item.Id == created.Id, CancellationToken.None);
+        Assert.Equal("Renamed Server", persisted.Name);
+        Assert.Equal(created.ExecutablePath, persisted.ExecutablePath);
+    }
+
     [Fact]
     public async Task ActiveServerInstanceCannotBeDeleted()
     {
@@ -164,6 +255,15 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
             $"/api/server-instances/{created.Id}",
             CancellationToken.None);
         Assert.Equal(HttpStatusCode.Conflict, deleteResponse.StatusCode);
+
+        using HttpResponseMessage updateResponse = await client.PutAsJsonAsync(
+            $"/api/server-instances/{created.Id}",
+            CreateRequest(Guid.Empty) with
+            {
+                ExecutablePath = "C:\\Servers\\replacement.exe",
+            },
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.Conflict, updateResponse.StatusCode);
 
         await using AsyncServiceScope verificationScope = factory.Services.CreateAsyncScope();
         ServerPilotDbContext verificationContext =

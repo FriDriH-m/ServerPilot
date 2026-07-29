@@ -16,11 +16,11 @@ public sealed class AgentCommandsController(
     ICurrentAgent currentAgent,
     ILogger<AgentCommandsController> logger) : ControllerBase
 {
-    private static readonly Action<ILogger, Guid, Guid, Exception?> LogCommandClaimed =
-        LoggerMessage.Define<Guid, Guid>(
+    private static readonly Action<ILogger, Guid, Guid, AgentCommandDeliveryKind, Exception?>
+        LogCommandDelivered = LoggerMessage.Define<Guid, Guid, AgentCommandDeliveryKind>(
             LogLevel.Information,
-            new EventId(1600, nameof(LogCommandClaimed)),
-            "Agent {AgentId} claimed ServerCommand {CommandId}");
+            new EventId(1600, nameof(LogCommandDelivered)),
+            "Agent {AgentId} received ServerCommand {CommandId} as {DeliveryKind}");
     private static readonly Action<ILogger, Guid, Guid, Exception?> LogForeignClaimAttempt =
         LoggerMessage.Define<Guid, Guid>(
             LogLevel.Warning,
@@ -38,7 +38,7 @@ public sealed class AgentCommandsController(
             "Agent {AgentId} was denied transition {Transition} for missing, foreign or invalid ServerCommand {CommandId}");
 
     [HttpPost("agents/{agentId:guid}/commands/claim-next")]
-    public async Task<ActionResult<ServerCommandResponse>> ClaimNext(
+    public async Task<ActionResult<AgentServerCommandResponse>> ClaimNext(
         Guid agentId,
         CancellationToken cancellationToken)
     {
@@ -53,16 +53,21 @@ public sealed class AgentCommandsController(
             return NotFound();
         }
 
-        ServerCommandDetails? command = await commands.ClaimNextAsync(
+        ClaimedServerCommandDetails? delivery = await commands.ClaimNextAsync(
             authenticatedAgentId,
             cancellationToken);
-        if (command is null)
+        if (delivery is null)
         {
             return NoContent();
         }
 
-        LogCommandClaimed(logger, authenticatedAgentId, command.Id, null);
-        return Ok(ToResponse(command));
+        LogCommandDelivered(
+            logger,
+            authenticatedAgentId,
+            delivery.Command.Id,
+            delivery.DeliveryKind,
+            null);
+        return Ok(ToResponse(delivery));
     }
 
     [HttpPost("commands/{commandId:guid}/start")]
@@ -137,7 +142,10 @@ public sealed class AgentCommandsController(
         };
     }
 
-    private static ServerCommandResponse ToResponse(ServerCommandDetails command) =>
+    private static AgentServerCommandResponse ToResponse(ClaimedServerCommandDetails delivery)
+    {
+        ServerCommandDetails command = delivery.Command;
+        return
         new(
             command.Id,
             command.AgentId,
@@ -150,5 +158,7 @@ public sealed class AgentCommandsController(
             command.CompletedAt,
             command.ErrorCode,
             command.AttemptCount,
-            command.CorrelationId);
+            command.CorrelationId,
+            delivery.DeliveryKind.ToString());
+    }
 }

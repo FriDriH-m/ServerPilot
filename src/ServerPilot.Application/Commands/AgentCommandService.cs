@@ -6,7 +6,7 @@ public sealed class AgentCommandService(
     IServerCommandRepository commands,
     TimeProvider timeProvider)
 {
-    public Task<ServerCommandDetails?> ClaimNextAsync(
+    public Task<ClaimedServerCommandDetails?> ClaimNextAsync(
         Guid agentId,
         CancellationToken cancellationToken)
     {

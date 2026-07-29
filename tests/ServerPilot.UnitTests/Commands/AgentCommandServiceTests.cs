@@ -96,7 +96,7 @@ public sealed class AgentCommandServiceTests
         public string? ErrorCode { get; private set; }
         public string? ErrorMessage { get; private set; }
 
-        public Task<ServerCommandDetails?> ClaimNextAsync(
+        public Task<ClaimedServerCommandDetails?> ClaimNextAsync(
             Guid agentId,
             DateTimeOffset claimedAt,
             CancellationToken cancellationToken)
@@ -104,7 +104,7 @@ public sealed class AgentCommandServiceTests
             ClaimCalls++;
             AgentId = agentId;
             TransitionAt = claimedAt;
-            return Task.FromResult<ServerCommandDetails?>(null);
+            return Task.FromResult<ClaimedServerCommandDetails?>(null);
         }
 
         public Task<AgentCommandTransitionStatus> StartAsync(
@@ -149,7 +149,7 @@ public sealed class AgentCommandServiceTests
         public Task<ServerCommandHistoryResult> ListOwnedAsync(
             Guid serverInstanceId,
             Guid userId,
-            int skip,
+            ServerCommandHistoryCursor? after,
             int limit,
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();

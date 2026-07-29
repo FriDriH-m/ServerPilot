@@ -85,14 +85,15 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Cross-user ServerInstance access | Create verifies ownership of the target Agent; list/get/update/delete scope through the Agent owner and foreign IDs return `404` | Future command endpoints must preserve the same ServerInstance ownership path |
 | Cross-user command creation or history access | Command creation and history queries scope the ServerInstance through its Agent owner; missing and foreign IDs both return `404` | Future command-by-ID APIs must preserve the same owner scope |
 | Conflicting Start/Stop requests under concurrency | PostgreSQL partial unique index permits one `Pending`, `Claimed` or `Running` command per ServerInstance; its named unique violation becomes `409` | Cancellation and retry policy are deferred to Agent command processing |
-| Two Agent polls claim the same command | One data-modifying statement uses `FOR UPDATE SKIP LOCKED` and `UPDATE ... RETURNING`; concurrent PostgreSQL tests prove one claim and one attempt | Claimed-command lease expiry and automatic retry are deferred |
+| Lost claim response or overlapping Agent polls | Claim locks the Agent row, re-delivers its existing `Claimed`/`Running` command, and a partial unique index permits only one such command per Agent | Lease expiry, abandonment and reassignment are deferred |
 | Agent claims or updates another Agent's command | Claim route ID must equal the credential identity; every command update includes authenticated `agent_id`, and missing/foreign IDs both return `404` | A stolen credential retains its Agent authority until revoked |
-| Replayed or forged command transition | Conditional updates require the exact predecessor state; matching duplicates are idempotent and conflicting repeats return `409` | Automated timeout/retry policy is not part of this issue |
+| Replayed, forged or clock-regressed command transition | Conditional updates require the exact predecessor state and nondecreasing timestamps; matching duplicates are idempotent and conflicts return `409` | API host clock synchronization remains an operational dependency |
 | Agent error discloses local details or exhausts storage | Failure code/message are required, trimmed and bounded; logs omit both details and user history omits the raw message | The Agent must use stable error codes and avoid unnecessary sensitive detail |
 | Command history disappears with its ServerInstance | ServerInstance deletion requires no persisted command history and otherwise returns `409` | Retention and archival policy are outside the MVP |
 | Local paths or launch arguments disclosed broadly | List responses and structured logs exclude paths and arguments; full configuration is returned only to the owning user | The owner can retrieve their configuration, so clients must protect their own API credentials |
-| Path traversal or an API-side path check targets the wrong machine | API rejects `.`/`..` and device-path segments, validates bounded Windows/UNC path shape only, and does not inspect a remote host | A future Agent must validate the stored configuration before process execution |
+| Path traversal or an API-side path check targets the wrong machine | API normalizes `/` and `\` for validation, rejects `.`/`..` and device namespaces, validates bounded Windows/UNC path shape only, and does not inspect a remote host | A future Agent must validate the stored configuration before process execution |
 | Active process configuration removed during management | Owner and inactive-state predicates are combined in one conditional delete; active states return `409` | A future command/state transition must handle a deleted inactive instance by verifying existence atomically |
+| Stored process configuration changes after a command is created | Process-critical updates return `409` while the process or a command is active; update and command creation serialize on the ServerInstance row | Configuration revisions and snapshots remain deferred |
 | Security operation has no audit trail | User/Agent registration, login, token operations and credential revocation emit structured events with identifiers but no credential values | Full API/Agent correlation remains in issue #31 |
 
 ## Security invariants
@@ -110,7 +111,8 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 - Scope every ServerInstance operation to the authenticated owner of its target Agent.
 - Scope every ServerCommand request and history query to the authenticated owner of its ServerInstance.
 - Persist at most one active (`Pending`, `Claimed` or `Running`) ServerCommand for a ServerInstance.
-- Claim a pending ServerCommand at most once, atomically in PostgreSQL, for its assigned Agent.
+- Persist at most one `Claimed` or `Running` ServerCommand for an Agent and re-deliver it
+  before claiming another command.
 - Scope every Agent command transition by both command ID and authenticated Agent ID.
 - Reject invalid command transitions; accept only explicitly defined idempotent duplicates.
 - Never return a raw Agent command failure message to the user API.

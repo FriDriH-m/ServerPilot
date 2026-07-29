@@ -59,6 +59,11 @@ public sealed class ServerInstancesController(
             LogLevel.Warning,
             new EventId(1406, nameof(LogServerInstanceDeletionWithCommandHistory)),
             "User {UserId} attempted to delete ServerInstance {ServerInstanceId} with command history");
+    private static readonly Action<ILogger, Guid, Guid, Exception?>
+        LogActiveServerInstanceUpdate = LoggerMessage.Define<Guid, Guid>(
+            LogLevel.Warning,
+            new EventId(1407, nameof(LogActiveServerInstanceUpdate)),
+            "User {UserId} attempted to change process configuration for active ServerInstance {ServerInstanceId}");
 
     [HttpPost]
     public async Task<ActionResult<ServerInstanceResponse>> Create(
@@ -166,19 +171,35 @@ public sealed class ServerInstancesController(
             return InvalidConfiguration();
         }
 
-        ServerInstanceDetails? serverInstance = await serverInstances.UpdateAsync(
+        UpdateServerInstanceResult result = await serverInstances.UpdateAsync(
             id,
             userId,
             configuration!,
             cancellationToken);
-        if (serverInstance is null)
+        if (result.Status == UpdateServerInstanceStatus.NotFound)
         {
             LogServerInstanceNotFound(logger, userId, id, null);
             return NotFound();
         }
 
+        if (result.Status == UpdateServerInstanceStatus.ActiveProcessOrCommand)
+        {
+            LogActiveServerInstanceUpdate(logger, userId, id, null);
+            return Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Conflict",
+                detail: "Process configuration cannot change while the server or one of its commands is active.");
+        }
+
+        if (result.Status != UpdateServerInstanceStatus.Succeeded ||
+            result.ServerInstance is null)
+        {
+            throw new InvalidOperationException(
+                $"Unsupported ServerInstance update status '{result.Status}'.");
+        }
+
         LogServerInstanceUpdated(logger, userId, id, null);
-        return Ok(ToResponse(serverInstance));
+        return Ok(ToResponse(result.ServerInstance));
     }
 
     [HttpDelete("{id:guid}")]

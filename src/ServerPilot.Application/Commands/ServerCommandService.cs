@@ -40,22 +40,22 @@ public sealed class ServerCommandService(
     public Task<ServerCommandHistoryResult> ListAsync(
         Guid userId,
         Guid serverInstanceId,
-        int page,
+        ServerCommandHistoryCursor? after,
         int limit,
         CancellationToken cancellationToken)
     {
         ValidateUserId(userId);
-        ValidatePagination(page, limit);
+        ValidateLimit(limit);
 
         if (serverInstanceId == Guid.Empty)
         {
-            return Task.FromResult(new ServerCommandHistoryResult(false, []));
+            return Task.FromResult(new ServerCommandHistoryResult(false, [], false));
         }
 
         return commands.ListOwnedAsync(
             serverInstanceId,
             userId,
-            (page - 1) * limit,
+            after,
             limit,
             cancellationToken);
     }
@@ -68,20 +68,13 @@ public sealed class ServerCommandService(
         }
     }
 
-    private static void ValidatePagination(int page, int limit)
+    private static void ValidateLimit(int limit)
     {
         if (limit is < 1 or > 100)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(limit),
                 "Server command history limit must be between 1 and 100.");
-        }
-
-        if (page is < 1 or > 1_000)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(page),
-                "Server command history page must be between 1 and 1000.");
         }
     }
 }

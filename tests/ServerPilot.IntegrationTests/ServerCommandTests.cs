@@ -80,30 +80,53 @@ public sealed class ServerCommandTests : IAsyncLifetime, IDisposable
         using HttpResponseMessage firstPageResponse = await GetCommandHistoryAsync(
             owner.AccessToken,
             serverInstance.Id,
-            page: 1,
             limit: 2);
         string firstPagePayload = await firstPageResponse.Content.ReadAsStringAsync(CancellationToken.None);
-        ServerCommandResponse[] firstPage = JsonSerializer.Deserialize<ServerCommandResponse[]>(
+        ServerCommandHistoryResponse firstPage = JsonSerializer.Deserialize<ServerCommandHistoryResponse>(
             firstPagePayload,
             JsonSerializerOptions.Web)!;
         Assert.Equal(HttpStatusCode.OK, firstPageResponse.StatusCode);
-        Assert.Equal([failedCommandId, stop.Id], firstPage.Select(command => command.Id));
-        ServerCommandResponse failed = firstPage[0];
+        Assert.Equal([failedCommandId, stop.Id], firstPage.Items.Select(command => command.Id));
+        Assert.NotNull(firstPage.NextCursor);
+        ServerCommandResponse failed = firstPage.Items[0];
         Assert.Equal(ServerCommandStatus.Failed.ToString(), failed.Status);
         Assert.Equal("ProcessFailed", failed.ErrorCode);
         Assert.DoesNotContain("C:\\Sensitive", firstPagePayload, StringComparison.Ordinal);
         Assert.DoesNotContain("errorMessage", firstPagePayload, StringComparison.OrdinalIgnoreCase);
 
+        await AddPendingCommandAsync(
+            agent.AgentId,
+            serverInstance.Id,
+            stop.CreatedAt.AddMinutes(2));
+
         using HttpResponseMessage secondPageResponse = await GetCommandHistoryAsync(
             owner.AccessToken,
             serverInstance.Id,
-            page: 2,
-            limit: 2);
-        ServerCommandResponse[] secondPage =
-            (await secondPageResponse.Content.ReadFromJsonAsync<ServerCommandResponse[]>())!;
+            limit: 2,
+            cursor: firstPage.NextCursor);
+        ServerCommandHistoryResponse secondPage =
+            (await secondPageResponse.Content.ReadFromJsonAsync<ServerCommandHistoryResponse>())!;
         Assert.Equal(HttpStatusCode.OK, secondPageResponse.StatusCode);
-        ServerCommandResponse remaining = Assert.Single(secondPage);
+        ServerCommandResponse remaining = Assert.Single(secondPage.Items);
         Assert.Equal(start.Id, remaining.Id);
+        Assert.Null(secondPage.NextCursor);
+
+        using HttpResponseMessage invalidCursorResponse = await GetCommandHistoryAsync(
+            owner.AccessToken,
+            serverInstance.Id,
+            limit: 2,
+            cursor: "not-a-cursor");
+        Assert.Equal(HttpStatusCode.BadRequest, invalidCursorResponse.StatusCode);
+
+        using HttpRequestMessage obsoletePageRequest = new(
+            HttpMethod.Get,
+            $"/api/server-instances/{serverInstance.Id}/commands?page=2&limit=2");
+        obsoletePageRequest.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", owner.AccessToken);
+        using HttpResponseMessage obsoletePageResponse = await client.SendAsync(
+            obsoletePageRequest,
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.BadRequest, obsoletePageResponse.StatusCode);
 
         using HttpRequestMessage deleteRequest = new(
             HttpMethod.Delete,
@@ -132,7 +155,6 @@ public sealed class ServerCommandTests : IAsyncLifetime, IDisposable
         using HttpResponseMessage listResponse = await GetCommandHistoryAsync(
             otherUser.AccessToken,
             serverInstance.Id,
-            page: 1,
             limit: 50);
 
         Assert.Equal(HttpStatusCode.NotFound, createResponse.StatusCode);
@@ -182,6 +204,42 @@ public sealed class ServerCommandTests : IAsyncLifetime, IDisposable
             item => item.ServerInstanceId == serverInstance.Id,
             CancellationToken.None);
         Assert.Equal(ServerCommandStatus.Pending, command.Status);
+    }
+
+    [Fact]
+    public async Task CursorPaginationDoesNotSkipCommandsWithIdenticalCreationTimes()
+    {
+        AuthenticationResponse owner = await RegisterUserAsync("command-cursor-tie@example.com");
+        RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "Cursor Tie Agent");
+        ServerInstanceResponse serverInstance = await CreateServerInstanceAsync(
+            owner.AccessToken,
+            agent.AgentId);
+        DateTimeOffset createdAt = TimeProvider.System.GetUtcNow();
+        Guid[] expectedIds = await AddCancelledCommandsAsync(
+            agent.AgentId,
+            serverInstance.Id,
+            createdAt,
+            count: 3);
+
+        List<Guid> receivedIds = [];
+        string? cursor = null;
+        do
+        {
+            using HttpResponseMessage response = await GetCommandHistoryAsync(
+                owner.AccessToken,
+                serverInstance.Id,
+                limit: 1,
+                cursor);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            ServerCommandHistoryResponse page =
+                (await response.Content.ReadFromJsonAsync<ServerCommandHistoryResponse>())!;
+            receivedIds.Add(Assert.Single(page.Items).Id);
+            cursor = page.NextCursor;
+        }
+        while (cursor is not null);
+
+        Assert.Equal(expectedIds.Order(), receivedIds.Order());
+        Assert.Equal(3, receivedIds.Distinct().Count());
     }
 
     private async Task CancelCommandAsync(Guid commandId, DateTimeOffset cancelledAt)
@@ -235,6 +293,51 @@ public sealed class ServerCommandTests : IAsyncLifetime, IDisposable
         dbContext.ServerCommands.Add(command);
         await dbContext.SaveChangesAsync(CancellationToken.None);
         return command.Id;
+    }
+
+    private async Task AddPendingCommandAsync(
+        Guid agentId,
+        Guid serverInstanceId,
+        DateTimeOffset createdAt)
+    {
+        ServerCommand command = ServerCommand.Create(
+            Guid.NewGuid(),
+            agentId,
+            serverInstanceId,
+            ServerCommandType.StartServer,
+            createdAt,
+            Guid.NewGuid());
+
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        ServerPilotDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+        dbContext.ServerCommands.Add(command);
+        await dbContext.SaveChangesAsync(CancellationToken.None);
+    }
+
+    private async Task<Guid[]> AddCancelledCommandsAsync(
+        Guid agentId,
+        Guid serverInstanceId,
+        DateTimeOffset createdAt,
+        int count)
+    {
+        ServerCommand[] commands = Enumerable.Range(0, count)
+            .Select(_ => ServerCommand.Create(
+                Guid.NewGuid(),
+                agentId,
+                serverInstanceId,
+                ServerCommandType.StartServer,
+                createdAt,
+                Guid.NewGuid()))
+            .ToArray();
+        Assert.All(commands, command => Assert.True(command.TryCancel(createdAt)));
+
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        ServerPilotDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+        dbContext.ServerCommands.AddRange(commands);
+        await dbContext.SaveChangesAsync(CancellationToken.None);
+        return commands.Select(command => command.Id).ToArray();
     }
 
     private async Task<AuthenticationResponse> RegisterUserAsync(string email)
@@ -310,12 +413,15 @@ public sealed class ServerCommandTests : IAsyncLifetime, IDisposable
     private async Task<HttpResponseMessage> GetCommandHistoryAsync(
         string accessToken,
         Guid serverInstanceId,
-        int page,
-        int limit)
+        int limit,
+        string? cursor = null)
     {
+        string cursorQuery = cursor is null
+            ? string.Empty
+            : $"&cursor={Uri.EscapeDataString(cursor)}";
         HttpRequestMessage request = new(
             HttpMethod.Get,
-            $"/api/server-instances/{serverInstanceId}/commands?page={page}&limit={limit}");
+            $"/api/server-instances/{serverInstanceId}/commands?limit={limit}{cursorQuery}");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return await client.SendAsync(request, CancellationToken.None);
     }
@@ -356,4 +462,8 @@ public sealed class ServerCommandTests : IAsyncLifetime, IDisposable
         string? ErrorCode,
         int AttemptCount,
         Guid CorrelationId);
+
+    private sealed record ServerCommandHistoryResponse(
+        IReadOnlyList<ServerCommandResponse> Items,
+        string? NextCursor);
 }

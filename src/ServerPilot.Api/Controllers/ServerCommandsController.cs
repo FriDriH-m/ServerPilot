@@ -22,7 +22,6 @@ public sealed class ServerCommandsController(
 {
     private const int DefaultListLimit = 50;
     private const int MaximumListLimit = 100;
-    private const int MaximumListPage = 1_000;
 
     private static readonly Action<ILogger, Guid, Guid, Guid, ServerCommandType, Exception?>
         LogServerCommandCreated = LoggerMessage.Define<Guid, Guid, Guid, ServerCommandType>(
@@ -53,21 +52,37 @@ public sealed class ServerCommandsController(
         CreateAsync(serverInstanceId, ServerCommandType.StopServer, cancellationToken);
 
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<ServerCommandResponse>>> List(
+    public async Task<ActionResult<ServerCommandHistoryResponse>> List(
         Guid serverInstanceId,
         CancellationToken cancellationToken,
         [FromQuery, Range(1, MaximumListLimit)] int limit = DefaultListLimit,
-        [FromQuery, Range(1, MaximumListPage)] int page = 1)
+        [FromQuery] string? cursor = null,
+        [FromQuery] int? page = null)
     {
         if (currentUser.UserId is not Guid userId)
         {
             return Unauthorized();
         }
 
+        if (page.HasValue)
+        {
+            ModelState.AddModelError(
+                nameof(page),
+                "Page-number pagination is not supported. Use the cursor parameter.");
+            return ValidationProblem(ModelState);
+        }
+
+        ServerCommandHistoryCursor? after = null;
+        if (cursor is not null && !ServerCommandCursorCodec.TryDecode(cursor, out after))
+        {
+            ModelState.AddModelError(nameof(cursor), "The command history cursor is invalid.");
+            return ValidationProblem(ModelState);
+        }
+
         ServerCommandHistoryResult result = await commands.ListAsync(
             userId,
             serverInstanceId,
-            page,
+            after,
             limit,
             cancellationToken);
         if (!result.ServerInstanceFound)
@@ -76,7 +91,12 @@ public sealed class ServerCommandsController(
             return NotFound();
         }
 
-        return Ok(result.Commands.Select(ToResponse).ToArray());
+        string? nextCursor = result.HasMore && result.Commands.Count > 0
+            ? ServerCommandCursorCodec.Encode(result.Commands[^1])
+            : null;
+        return Ok(new ServerCommandHistoryResponse(
+            result.Commands.Select(ToResponse).ToArray(),
+            nextCursor));
     }
 
     private async Task<ActionResult<ServerCommandResponse>> CreateAsync(
