@@ -5,6 +5,10 @@ using Microsoft.EntityFrameworkCore.Storage;
 using ServerPilot.Application.ServerInstances;
 using ServerPilot.Domain.Commands;
 using ServerPilot.Domain.ServerInstances;
+using ApplicationStateReportResult =
+    ServerPilot.Application.ServerInstances.ServerInstanceStateReportResult;
+using DomainStateReportResult =
+    ServerPilot.Domain.ServerInstances.ServerInstanceStateReportResult;
 using ServerInstanceEntity = ServerPilot.Domain.ServerInstances.ServerInstance;
 
 namespace ServerPilot.Infrastructure.Persistence;
@@ -19,15 +23,15 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
         ServerInstanceStatus.Stopping,
     ];
 
-    public Task<bool> IsAgentOwnedByUserAsync(
+    public Task<ServerInstanceAgentDetails?> FindAgentOwnedByUserAsync(
         Guid agentId,
         Guid userId,
         CancellationToken cancellationToken) =>
         dbContext.Agents
             .AsNoTracking()
-            .AnyAsync(
-                agent => agent.Id == agentId && agent.UserId == userId,
-                cancellationToken);
+            .Where(agent => agent.Id == agentId && agent.UserId == userId)
+            .Select(agent => new ServerInstanceAgentDetails(agent.LastSeenAt))
+            .SingleOrDefaultAsync(cancellationToken);
 
     public async Task AddAsync(
         ServerInstanceEntity serverInstance,
@@ -53,7 +57,15 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
                 serverInstance.AgentId,
                 serverInstance.Name,
                 serverInstance.Status,
+                serverInstance.Status,
                 serverInstance.LastProcessId,
+                serverInstance.LastProcessStartedAt,
+                serverInstance.LastStatusReportedAt,
+                false,
+                dbContext.Agents
+                    .Where(agent => agent.Id == serverInstance.AgentId)
+                    .Select(agent => agent.LastSeenAt)
+                    .Single(),
                 serverInstance.CreatedAt,
                 serverInstance.UpdatedAt))
             .ToArrayAsync(cancellationToken);
@@ -122,9 +134,14 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
         serverInstance.UpdateConfiguration(configuration, updatedAt);
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        DateTimeOffset? agentLastSeenAt = await dbContext.Agents
+            .AsNoTracking()
+            .Where(agent => agent.Id == serverInstance.AgentId)
+            .Select(agent => agent.LastSeenAt)
+            .SingleAsync(cancellationToken);
         return new UpdateServerInstanceResult(
             UpdateServerInstanceStatus.Succeeded,
-            MapDetails(serverInstance));
+            MapDetails(serverInstance, agentLastSeenAt));
     }
 
     public async Task<DeleteServerInstanceStatus> DeleteOwnedAsync(
@@ -173,6 +190,84 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
         return DeleteServerInstanceStatus.Active;
     }
 
+    public async Task<IReadOnlyList<AssignedServerInstanceDetails>> ListAssignedAsync(
+        Guid agentId,
+        int skip,
+        int limit,
+        CancellationToken cancellationToken) =>
+        await dbContext.ServerInstances
+            .AsNoTracking()
+            .Where(serverInstance => serverInstance.AgentId == agentId)
+            .OrderBy(serverInstance => serverInstance.CreatedAt)
+            .ThenBy(serverInstance => serverInstance.Id)
+            .Skip(skip)
+            .Take(limit)
+            .Select(serverInstance => new AssignedServerInstanceDetails(
+                serverInstance.Id,
+                serverInstance.ExecutablePath,
+                serverInstance.Arguments,
+                serverInstance.WorkingDirectory,
+                serverInstance.ProcessName,
+                serverInstance.Status,
+                serverInstance.LastProcessId,
+                serverInstance.LastProcessStartedAt,
+                serverInstance.LastStatusReportedAt))
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<ApplicationStateReportResult> RecordProcessStateAsync(
+            Guid agentId,
+            Guid serverInstanceId,
+            ServerInstanceStatus status,
+            int? processId,
+            DateTimeOffset? processStartedAt,
+            DateTimeOffset reportedAt,
+            CancellationToken cancellationToken)
+    {
+        await using IDbContextTransaction transaction =
+            await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        if (!await LockAssignedServerInstanceAsync(
+                serverInstanceId,
+                agentId,
+                cancellationToken))
+        {
+            return ApplicationStateReportResult.NotFound;
+        }
+
+        ServerInstanceEntity? serverInstance = await dbContext.ServerInstances
+            .SingleOrDefaultAsync(
+                item => item.Id == serverInstanceId && item.AgentId == agentId,
+                cancellationToken);
+        if (serverInstance is null)
+        {
+            return ApplicationStateReportResult.NotFound;
+        }
+
+        DomainStateReportResult result =
+            serverInstance.RecordProcessState(
+                status,
+                processId,
+                processStartedAt,
+                reportedAt);
+        ApplicationStateReportResult mapped = result switch
+        {
+            DomainStateReportResult.Succeeded => ApplicationStateReportResult.Succeeded,
+            DomainStateReportResult.AlreadyApplied => ApplicationStateReportResult.AlreadyApplied,
+            DomainStateReportResult.InvalidState => ApplicationStateReportResult.InvalidState,
+            DomainStateReportResult.InvalidProcessIdentity =>
+                ApplicationStateReportResult.InvalidProcessIdentity,
+            DomainStateReportResult.StaleReport => ApplicationStateReportResult.StaleReport,
+            _ => throw new InvalidOperationException(
+                $"Unsupported process-state report result '{result}'."),
+        };
+        if (mapped == ApplicationStateReportResult.Succeeded)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        return mapped;
+    }
+
     private IQueryable<ServerInstanceEntity> OwnedByUser(Guid userId) =>
         dbContext.ServerInstances.Where(serverInstance =>
             dbContext.Agents.Any(agent =>
@@ -202,6 +297,29 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
         return result is not null and not DBNull;
     }
 
+    private async Task<bool> LockAssignedServerInstanceAsync(
+        Guid id,
+        Guid agentId,
+        CancellationToken cancellationToken)
+    {
+        const string sql =
+            """
+            SELECT id
+            FROM server_instances
+            WHERE id = @id AND agent_id = @agent_id
+            FOR UPDATE
+            """;
+
+        DbConnection connection = dbContext.Database.GetDbConnection();
+        await using DbCommand command = connection.CreateCommand();
+        command.Transaction = dbContext.Database.CurrentTransaction!.GetDbTransaction();
+        command.CommandText = sql;
+        AddParameter(command, "id", DbType.Guid, id);
+        AddParameter(command, "agent_id", DbType.Guid, agentId);
+        object? result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null and not DBNull;
+    }
+
     private static void AddParameter(
         DbCommand command,
         string name,
@@ -215,7 +333,7 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
         command.Parameters.Add(parameter);
     }
 
-    private static IQueryable<ServerInstanceDetails> ProjectDetails(
+    private IQueryable<ServerInstanceDetails> ProjectDetails(
         IQueryable<ServerInstanceEntity> query) =>
         query.Select(serverInstance => new ServerInstanceDetails(
             serverInstance.Id,
@@ -226,11 +344,21 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
             serverInstance.WorkingDirectory,
             serverInstance.ProcessName,
             serverInstance.Status,
+            serverInstance.Status,
             serverInstance.LastProcessId,
+            serverInstance.LastProcessStartedAt,
+            serverInstance.LastStatusReportedAt,
+            false,
+            dbContext.Agents
+                .Where(agent => agent.Id == serverInstance.AgentId)
+                .Select(agent => agent.LastSeenAt)
+                .Single(),
             serverInstance.CreatedAt,
             serverInstance.UpdatedAt));
 
-    private static ServerInstanceDetails MapDetails(ServerInstanceEntity serverInstance) =>
+    private static ServerInstanceDetails MapDetails(
+        ServerInstanceEntity serverInstance,
+        DateTimeOffset? agentLastSeenAt) =>
         new(
             serverInstance.Id,
             serverInstance.AgentId,
@@ -240,7 +368,12 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
             serverInstance.WorkingDirectory,
             serverInstance.ProcessName,
             serverInstance.Status,
+            serverInstance.Status,
             serverInstance.LastProcessId,
+            serverInstance.LastProcessStartedAt,
+            serverInstance.LastStatusReportedAt,
+            false,
+            agentLastSeenAt,
             serverInstance.CreatedAt,
             serverInstance.UpdatedAt);
 

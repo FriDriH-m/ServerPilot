@@ -6,6 +6,16 @@ public interface IAgentApiClient
 {
     Task SendHeartbeatAsync(AgentCredential credential, CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<AssignedAgentServerInstance>> ListServerInstancesAsync(
+        AgentCredential credential,
+        CancellationToken cancellationToken);
+
+    Task ReportServerInstanceStateAsync(
+        AgentCredential credential,
+        Guid serverInstanceId,
+        AgentProcessStateReport report,
+        CancellationToken cancellationToken);
+
     Task<ClaimedAgentCommand?> ClaimNextCommandAsync(
         AgentCredential credential,
         CancellationToken cancellationToken);

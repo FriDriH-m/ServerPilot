@@ -20,7 +20,9 @@ public sealed class AgentCommandExecutorTests
             StartResult = new ProcessSupervisorResult(ProcessSupervisorStatus.Started),
         };
         supervisor.InspectionResults.Enqueue(
-            new ProcessSupervisorResult(ProcessSupervisorStatus.Running));
+            new ProcessSupervisorResult(
+                ProcessSupervisorStatus.Running,
+                CreateIdentity()));
         AgentCommandExecutor executor = CreateExecutor(apiClient, supervisor);
 
         await executor.ExecuteAsync(
@@ -29,7 +31,7 @@ public sealed class AgentCommandExecutorTests
             CancellationToken.None);
 
         Assert.Equal(
-            ["api:start", "process:start", "process:inspect", "api:complete"],
+            ["api:start", "process:start", "process:inspect", "api:state", "api:complete"],
             events);
     }
 
@@ -52,7 +54,7 @@ public sealed class AgentCommandExecutorTests
             CancellationToken.None);
 
         Assert.Equal(
-            ["api:start", "process:stop", "process:inspect", "api:complete"],
+            ["api:start", "process:stop", "process:inspect", "api:state", "api:complete"],
             events);
     }
 
@@ -91,7 +93,9 @@ public sealed class AgentCommandExecutorTests
             StartResult = new ProcessSupervisorResult(ProcessSupervisorStatus.Started),
         };
         supervisor.InspectionResults.Enqueue(
-            new ProcessSupervisorResult(ProcessSupervisorStatus.Running));
+            new ProcessSupervisorResult(
+                ProcessSupervisorStatus.Running,
+                CreateIdentity()));
         AgentCommandExecutor executor = CreateExecutor(apiClient, supervisor);
         AgentCommandExecution execution = new(CreateCommand(AgentCommandType.StartServer));
 
@@ -106,6 +110,7 @@ public sealed class AgentCommandExecutorTests
         Assert.Equal(1, supervisor.StartCalls);
         Assert.Equal(1, supervisor.InspectCalls);
         Assert.Equal(1, apiClient.StartCalls);
+        Assert.Equal(1, apiClient.StateReportCalls);
         Assert.Equal(5, apiClient.CompleteCalls);
     }
 
@@ -176,6 +181,12 @@ public sealed class AgentCommandExecutorTests
             @"C:\Servers",
             "server"));
 
+    private static ProcessIdentity CreateIdentity() => new(
+        42,
+        new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero),
+        @"C:\Servers\server.exe",
+        "server");
+
     private sealed class RecordingApiClient(List<string> events) : IAgentApiClient
     {
         public int CompleteFailuresRemaining { get; set; }
@@ -184,6 +195,8 @@ public sealed class AgentCommandExecutorTests
 
         public int CompleteCalls { get; private set; }
 
+        public int StateReportCalls { get; private set; }
+
         public string? ErrorCode { get; private set; }
 
         public string? ErrorMessage { get; private set; }
@@ -191,6 +204,22 @@ public sealed class AgentCommandExecutorTests
         public Task SendHeartbeatAsync(
             AgentCredential credential,
             CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<IReadOnlyList<AssignedAgentServerInstance>> ListServerInstancesAsync(
+            AgentCredential credential,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<AssignedAgentServerInstance>>([]);
+
+        public Task ReportServerInstanceStateAsync(
+            AgentCredential credential,
+            Guid serverInstanceId,
+            AgentProcessStateReport report,
+            CancellationToken cancellationToken)
+        {
+            events.Add("api:state");
+            StateReportCalls++;
+            return Task.CompletedTask;
+        }
 
         public Task<ClaimedAgentCommand?> ClaimNextCommandAsync(
             AgentCredential credential,

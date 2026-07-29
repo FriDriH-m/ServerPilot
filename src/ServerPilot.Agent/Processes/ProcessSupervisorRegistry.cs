@@ -13,7 +13,8 @@ public sealed record ProcessSupervisorRequest(
     string ExecutablePath,
     string Arguments,
     string WorkingDirectory,
-    string ProcessName);
+    string ProcessName,
+    ProcessIdentity? TrackedIdentity = null);
 
 public enum ProcessSupervisorResolutionFailure
 {
@@ -71,7 +72,8 @@ public sealed class LocalProcessSupervisorRegistry(
                 serverInstanceId,
                 configuration,
                 platform,
-                loggerFactory.CreateLogger<LocalProcessSupervisor>());
+                loggerFactory.CreateLogger<LocalProcessSupervisor>(),
+                trackedIdentity: request.TrackedIdentity);
             entries.Add(serverInstanceId, new RegistryEntry(configuration, supervisor));
             return ProcessSupervisorResolution.Succeeded(supervisor);
         }

@@ -11,7 +11,11 @@ public sealed class AgentCommandExecution(ClaimedAgentCommand command)
 
     public AgentCommandOutcome? Outcome { get; private set; }
 
+    public bool ProcessStateReported { get; private set; }
+
     public void MarkRunningReported() => RunningReported = true;
+
+    public void MarkProcessStateReported() => ProcessStateReported = true;
 
     public void RecordOutcome(AgentCommandOutcome outcome)
     {

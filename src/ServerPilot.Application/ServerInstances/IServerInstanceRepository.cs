@@ -4,7 +4,7 @@ namespace ServerPilot.Application.ServerInstances;
 
 public interface IServerInstanceRepository
 {
-    Task<bool> IsAgentOwnedByUserAsync(
+    Task<ServerInstanceAgentDetails?> FindAgentOwnedByUserAsync(
         Guid agentId,
         Guid userId,
         CancellationToken cancellationToken);
@@ -32,5 +32,20 @@ public interface IServerInstanceRepository
     Task<DeleteServerInstanceStatus> DeleteOwnedAsync(
         Guid id,
         Guid userId,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<AssignedServerInstanceDetails>> ListAssignedAsync(
+        Guid agentId,
+        int skip,
+        int limit,
+        CancellationToken cancellationToken);
+
+    Task<ServerInstanceStateReportResult> RecordProcessStateAsync(
+        Guid agentId,
+        Guid serverInstanceId,
+        ServerInstanceStatus status,
+        int? processId,
+        DateTimeOffset? processStartedAt,
+        DateTimeOffset reportedAt,
         CancellationToken cancellationToken);
 }

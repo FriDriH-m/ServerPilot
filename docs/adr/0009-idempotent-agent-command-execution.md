@@ -38,8 +38,8 @@ ServerInstance trust boundary.
   turns command delivery into an arbitrary execution channel.
 - Retry the complete orchestration after any API failure: rejected because a lost
   terminal response would repeat a local side effect.
-- Add a durable Agent execution journal now: deferred because #30 owns restart recovery,
-  process rediscovery and persisted actual-state reconciliation.
+- Add a durable Agent execution journal now: deferred; #30 adds persisted actual-state
+  reconciliation and safe process rediscovery without a general command journal.
 - Update ServerInstance status from the user command or command transition alone:
   rejected because requested state is not proof of actual process state; #30 adds the
   Agent-authenticated actual-state contract.
@@ -50,9 +50,9 @@ ServerInstance trust boundary.
   remains absent from user list responses, command history and structured logs.
 - Process actions are not automatically retried within one Agent lifetime. Only their
   already-recorded result is retried after a reporting outage.
-- A fresh Agent process cannot yet rediscover an already running server safely. Recovery
-  across Agent restart, unexpected exit detection and persisted ServerInstance status
-  remain explicitly in #30.
+- ADR 0010 extends the flow with Agent-authenticated state reporting, persisted full process
+  identity, restart rediscovery and unexpected-exit detection. A process without a complete
+  previously persisted identity is still not auto-adopted.
 - A configuration validation or process error leaves an auditable `Failed` command with
   safe details instead of leaking local host information.
 

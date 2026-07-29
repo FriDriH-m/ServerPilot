@@ -137,6 +137,8 @@ WorkingDirectory
 ProcessName
 Status
 LastProcessId
+LastProcessStartedAt
+LastStatusReportedAt
 CreatedAt
 UpdatedAt
 ```
@@ -224,6 +226,12 @@ Unreachable
 
 Agent должен проверять фактическое состояние локального процесса.
 
+`Running`, `Stopped` и `Crashed` сохраняются только из Agent-authenticated отчёта о
+проверенном процессе. Для `Running` сохраняются PID и UTC-время старта; `Stopped` и
+`Crashed` очищают identity. Если owning Agent offline, пользовательский effective status
+равен `Unreachable`, но последнее reported-состояние остаётся доступным как stale snapshot.
+Offline не должен записывать или подразумевать `Stopped`.
+
 ## Состояния команды
 
 ```text
@@ -262,6 +270,8 @@ Agent периодически вызывает API:
 
 ```http
 POST /api/agents/{agentId}/heartbeat
+GET /api/agents/{agentId}/server-instances
+POST /api/agents/{agentId}/server-instances/{serverInstanceId}/status
 POST /api/agents/{agentId}/commands/claim-next
 POST /api/commands/{commandId}/start
 POST /api/commands/{commandId}/complete
@@ -282,6 +292,13 @@ POST /api/commands/{commandId}/fail
 `Running`, выполняет process action один раз, проверяет фактическое состояние и затем
 отправляет `Completed` либо безопасный `Failed`. Потерянный terminal response повторяет
 только report, а не локальное действие.
+
+После запуска Agent сначала успешно получает назначенные ServerInstance и только затем
+начинает command polling. Периодический reconciliation и command execution сериализованы:
+успешный Start/Stop отправляет verified process state до terminal command result. После
+рестарта ранее сохранённый `Running` процесс принимается только при совпадении PID, времени
+старта, executable path и process name. Исчезнувший или stale ранее `Running` identity
+становится `Crashed`; ошибка inspection не должна создавать фиктивный `Stopped`.
 
 ## Идемпотентность
 
@@ -390,6 +407,19 @@ POST /api/commands/{commandId}/complete
 POST /api/commands/{commandId}/fail
 ```
 
+### Agent process-state reconciliation
+
+```http
+GET /api/agents/{agentId}/server-instances?page={page}
+POST /api/agents/{agentId}/server-instances/{serverInstanceId}/status
+```
+
+Оба маршрута требуют Agent credential и точного совпадения route Agent ID с principal.
+Список постранично возвращает только ServerInstance этого Agent, их сохранённую
+process-конфигурацию и последнее identity. State report дополнительно проверяет связь
+ServerInstance с Agent, сериализуется row lock с изменением конфигурации и принимает только
+явные `Running`, `Stopped` или `Crashed` с согласованными PID/start-time полями.
+
 `claim-next` доступен только Agent credential, чей Agent ID точно совпадает с маршрутом.
 Он блокирует строку Agent на время короткого PostgreSQL statement. Уже назначенная этому
 Agent команда в `Claimed` или `Running` выдаётся повторно как `Recovery`; только при её
@@ -413,6 +443,8 @@ Agent команда в `Claimed` или `Running` выдаётся повтор
 - невозможность запуска второго процесса;
 - повторная остановка уже остановленного процесса;
 - валидация ServerInstance;
+- переходы actual process state и обязательность полного Running identity;
+- restart rediscovery и unexpected-exit reconciliation;
 - проверка истечения installation token.
 
 Минимальные integration-тесты:
@@ -422,6 +454,8 @@ Agent команда в `Claimed` или `Running` выдаётся повтор
 - отклонение просроченного token;
 - heartbeat;
 - создание ServerInstance;
+- Agent-scoped list/status report, persisted PID/start time и защита чужого Agent;
+- effective `Unreachable` при offline Agent без потери last reported state;
 - запрет доступа к чужому Agent;
 - создание команды запуска;
 - атомарное получение следующей команды;

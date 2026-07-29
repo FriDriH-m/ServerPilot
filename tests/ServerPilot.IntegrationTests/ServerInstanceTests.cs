@@ -53,7 +53,9 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
             (await createResponse.Content.ReadFromJsonAsync<ServerInstanceResponse>())!;
         Assert.Equal(agent.AgentId, created.AgentId);
         Assert.Equal(createRequest.ExecutablePath, created.ExecutablePath);
-        Assert.Equal(ServerInstanceStatus.Unknown.ToString(), created.Status);
+        Assert.Equal(ServerInstanceStatus.Unreachable.ToString(), created.Status);
+        Assert.Equal(ServerInstanceStatus.Unknown.ToString(), created.ReportedStatus);
+        Assert.True(created.IsStateStale);
 
         using HttpResponseMessage listResponse = await client.GetAsync(
             "/api/server-instances",
@@ -247,6 +249,7 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
             instance.RecordProcessState(
                 ServerInstanceStatus.Running,
                 1_234,
+                TimeProvider.System.GetUtcNow().AddSeconds(-1),
                 TimeProvider.System.GetUtcNow());
             await dbContext.SaveChangesAsync(CancellationToken.None);
         }
@@ -273,6 +276,110 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
             .Select(item => (ServerInstanceStatus?)item.Status)
             .SingleOrDefaultAsync(CancellationToken.None);
         Assert.Equal(ServerInstanceStatus.Running, status);
+    }
+
+    [Fact]
+    public async Task AgentReportsActualStateAndOfflineOwnerViewRemainsUnreachable()
+    {
+        AuthenticationResponse owner = await RegisterUserAsync("state-owner@example.com");
+        RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "State Agent");
+        AuthenticationResponse otherOwner = await RegisterUserAsync("state-other@example.com");
+        RegisteredAgent otherAgent = await RegisterAgentAsync(
+            otherOwner.AccessToken,
+            "Other State Agent");
+
+        AuthorizeUser(owner.AccessToken);
+        using HttpResponseMessage createResponse = await client.PostAsJsonAsync(
+            "/api/server-instances",
+            CreateRequest(agent.AgentId),
+            CancellationToken.None);
+        ServerInstanceResponse created =
+            (await createResponse.Content.ReadFromJsonAsync<ServerInstanceResponse>())!;
+
+        AuthorizeAgent(agent.Credential);
+        using HttpResponseMessage assignmentsResponse = await client.GetAsync(
+            $"/api/agents/{agent.AgentId}/server-instances",
+            CancellationToken.None);
+        AgentServerInstanceResponse assignment = Assert.Single(
+            (await assignmentsResponse.Content
+                .ReadFromJsonAsync<AgentServerInstanceResponse[]>())!);
+        Assert.Equal(HttpStatusCode.OK, assignmentsResponse.StatusCode);
+        Assert.Equal(created.Id, assignment.Id);
+        Assert.Equal(created.ExecutablePath, assignment.ExecutablePath);
+        Assert.Equal(ServerInstanceStatus.Unknown.ToString(), assignment.ReportedStatus);
+
+        AuthorizeAgent(otherAgent.Credential);
+        using HttpResponseMessage foreignList = await client.GetAsync(
+            $"/api/agents/{agent.AgentId}/server-instances",
+            CancellationToken.None);
+        using HttpResponseMessage foreignReport = await client.PostAsJsonAsync(
+            $"/api/agents/{otherAgent.AgentId}/server-instances/{created.Id}/status",
+            new { Status = "Stopped" },
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.NotFound, foreignList.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, foreignReport.StatusCode);
+
+        DateTimeOffset processStartedAt = TimeProvider.System.GetUtcNow().AddMinutes(-1);
+        AuthorizeAgent(agent.Credential);
+        using HttpResponseMessage runningReport = await client.PostAsJsonAsync(
+            $"/api/agents/{agent.AgentId}/server-instances/{created.Id}/status",
+            new
+            {
+                Status = "Running",
+                ProcessId = 4_242,
+                ProcessStartedAt = processStartedAt,
+            },
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.NoContent, runningReport.StatusCode);
+
+        AuthorizeUser(owner.AccessToken);
+        ServerInstanceResponse offlineView = (await client.GetFromJsonAsync<ServerInstanceResponse>(
+            $"/api/server-instances/{created.Id}",
+            CancellationToken.None))!;
+        Assert.Equal(ServerInstanceStatus.Unreachable.ToString(), offlineView.Status);
+        Assert.Equal(ServerInstanceStatus.Running.ToString(), offlineView.ReportedStatus);
+        Assert.True(offlineView.IsStateStale);
+        Assert.Equal(4_242, offlineView.LastProcessId);
+        Assert.Equal(
+            processStartedAt,
+            offlineView.LastProcessStartedAt!.Value,
+            TimeSpan.FromMilliseconds(1));
+        Assert.NotNull(offlineView.LastStatusReportedAt);
+
+        AuthorizeAgent(agent.Credential);
+        using HttpResponseMessage heartbeat = await client.PostAsync(
+            $"/api/agents/{agent.AgentId}/heartbeat",
+            null,
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.NoContent, heartbeat.StatusCode);
+
+        AuthorizeUser(owner.AccessToken);
+        ServerInstanceResponse onlineView = (await client.GetFromJsonAsync<ServerInstanceResponse>(
+            $"/api/server-instances/{created.Id}",
+            CancellationToken.None))!;
+        Assert.Equal(ServerInstanceStatus.Running.ToString(), onlineView.Status);
+        Assert.False(onlineView.IsStateStale);
+
+        AuthorizeAgent(agent.Credential);
+        using HttpResponseMessage invalidStopped = await client.PostAsJsonAsync(
+            $"/api/agents/{agent.AgentId}/server-instances/{created.Id}/status",
+            new { Status = "Stopped", ProcessId = 4_242 },
+            CancellationToken.None);
+        using HttpResponseMessage crashedReport = await client.PostAsJsonAsync(
+            $"/api/agents/{agent.AgentId}/server-instances/{created.Id}/status",
+            new { Status = "Crashed" },
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidStopped.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, crashedReport.StatusCode);
+
+        AuthorizeUser(owner.AccessToken);
+        ServerInstanceResponse crashedView = (await client.GetFromJsonAsync<ServerInstanceResponse>(
+            $"/api/server-instances/{created.Id}",
+            CancellationToken.None))!;
+        Assert.Equal(ServerInstanceStatus.Crashed.ToString(), crashedView.Status);
+        Assert.Equal(ServerInstanceStatus.Crashed.ToString(), crashedView.ReportedStatus);
+        Assert.Null(crashedView.LastProcessId);
+        Assert.Null(crashedView.LastProcessStartedAt);
     }
 
     private async Task<AuthenticationResponse> RegisterUserAsync(string email)
@@ -319,6 +426,10 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
         client.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", accessToken);
 
+    private void AuthorizeAgent(string credential) =>
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Agent", credential);
+
     private static ServerInstanceRequest CreateRequest(Guid agentId) =>
         new(
             agentId,
@@ -351,7 +462,11 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
         string WorkingDirectory,
         string ProcessName,
         string Status,
+        string ReportedStatus,
         int? LastProcessId,
+        DateTimeOffset? LastProcessStartedAt,
+        DateTimeOffset? LastStatusReportedAt,
+        bool IsStateStale,
         DateTimeOffset CreatedAt,
         DateTimeOffset UpdatedAt);
 
@@ -360,7 +475,16 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
         Guid AgentId,
         string Name,
         string Status,
+        string ReportedStatus,
         int? LastProcessId,
+        DateTimeOffset? LastProcessStartedAt,
+        DateTimeOffset? LastStatusReportedAt,
+        bool IsStateStale,
         DateTimeOffset CreatedAt,
         DateTimeOffset UpdatedAt);
+
+    private sealed record AgentServerInstanceResponse(
+        Guid Id,
+        string ExecutablePath,
+        string ReportedStatus);
 }

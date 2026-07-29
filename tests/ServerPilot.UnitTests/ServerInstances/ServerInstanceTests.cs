@@ -90,6 +90,7 @@ public sealed class ServerInstanceTests
         instance.RecordProcessState(
             ServerInstanceStatus.Running,
             42,
+            CreatedAt.AddSeconds(30),
             updatedAt.AddSeconds(1));
 
         Assert.Equal("Updated", instance.Name);
@@ -99,10 +100,12 @@ public sealed class ServerInstanceTests
         Assert.Equal(updatedAt.AddSeconds(1), instance.UpdatedAt);
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             instance.UpdateConfiguration(CreateConfiguration("Stale"), CreatedAt));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        Assert.Equal(
+            ServerInstanceStateReportResult.InvalidProcessIdentity,
             instance.RecordProcessState(
                 ServerInstanceStatus.Stopped,
                 0,
+                null,
                 updatedAt.AddSeconds(2)));
     }
 
@@ -118,15 +121,108 @@ public sealed class ServerInstanceTests
         instance.RecordProcessState(
             ServerInstanceStatus.Running,
             42,
+            CreatedAt.AddSeconds(30),
             CreatedAt.AddMinutes(1));
         instance.RecordProcessState(
             ServerInstanceStatus.Stopped,
+            null,
             null,
             CreatedAt.AddMinutes(2));
 
         Assert.False(instance.IsActive);
         Assert.Null(instance.LastProcessId);
         Assert.Equal(ServerInstanceStatus.Stopped, instance.Status);
+    }
+
+    [Fact]
+    public void ProcessStateReportsEnforceIdentityAndTransitions()
+    {
+        ServerInstance instance = ServerInstance.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            CreateConfiguration("Server"),
+            CreatedAt);
+
+        ServerInstanceStateReportResult invalidCrash = instance.RecordProcessState(
+            ServerInstanceStatus.Crashed,
+            null,
+            null,
+            CreatedAt.AddSeconds(1));
+        ServerInstanceStateReportResult invalidRunning = instance.RecordProcessState(
+            ServerInstanceStatus.Running,
+            42,
+            null,
+            CreatedAt.AddSeconds(2));
+        ServerInstanceStateReportResult stopped = instance.RecordProcessState(
+            ServerInstanceStatus.Stopped,
+            null,
+            null,
+            CreatedAt.AddSeconds(3));
+
+        Assert.Equal(ServerInstanceStateReportResult.InvalidState, invalidCrash);
+        Assert.Equal(ServerInstanceStateReportResult.InvalidProcessIdentity, invalidRunning);
+        Assert.Equal(ServerInstanceStateReportResult.Succeeded, stopped);
+        Assert.Equal(CreatedAt.AddSeconds(3), instance.LastStatusReportedAt);
+    }
+
+    [Fact]
+    public void UnexpectedExitCanTransitionRunningToCrashedAndClearIdentity()
+    {
+        ServerInstance instance = ServerInstance.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            CreateConfiguration("Server"),
+            CreatedAt);
+        DateTimeOffset processStartedAt = CreatedAt.AddSeconds(1);
+
+        instance.RecordProcessState(
+            ServerInstanceStatus.Running,
+            42,
+            processStartedAt,
+            CreatedAt.AddSeconds(2));
+        ServerInstanceStateReportResult result = instance.RecordProcessState(
+            ServerInstanceStatus.Crashed,
+            null,
+            null,
+            CreatedAt.AddSeconds(3));
+
+        Assert.Equal(ServerInstanceStateReportResult.Succeeded, result);
+        Assert.Equal(ServerInstanceStatus.Crashed, instance.Status);
+        Assert.Null(instance.LastProcessId);
+        Assert.Null(instance.LastProcessStartedAt);
+    }
+
+    [Fact]
+    public void ProcessStateReportWithSameTimestampMustBeAnExactRetry()
+    {
+        ServerInstance instance = ServerInstance.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            CreateConfiguration("Server"),
+            CreatedAt);
+        DateTimeOffset reportedAt = CreatedAt.AddSeconds(2);
+
+        ServerInstanceStateReportResult applied = instance.RecordProcessState(
+            ServerInstanceStatus.Running,
+            42,
+            CreatedAt.AddSeconds(1),
+            reportedAt);
+        ServerInstanceStateReportResult exactRetry = instance.RecordProcessState(
+            ServerInstanceStatus.Running,
+            42,
+            CreatedAt.AddSeconds(1),
+            reportedAt);
+        ServerInstanceStateReportResult conflictingRetry = instance.RecordProcessState(
+            ServerInstanceStatus.Crashed,
+            null,
+            null,
+            reportedAt);
+
+        Assert.Equal(ServerInstanceStateReportResult.Succeeded, applied);
+        Assert.Equal(ServerInstanceStateReportResult.AlreadyApplied, exactRetry);
+        Assert.Equal(ServerInstanceStateReportResult.StaleReport, conflictingRetry);
+        Assert.Equal(ServerInstanceStatus.Running, instance.Status);
+        Assert.Equal(42, instance.LastProcessId);
     }
 
     private static ServerInstanceConfiguration CreateConfiguration(string name)
