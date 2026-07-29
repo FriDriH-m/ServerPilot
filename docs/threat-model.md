@@ -3,9 +3,10 @@
 This lightweight model is updated when an active issue introduces a real trust
 boundary. It currently covers user authentication, one-time Agent installation tokens,
 Agent registration, revocable Agent credentials, Windows DPAPI-protected local Agent
-credential storage, persisted ServerInstance process configuration, owner-created
-ServerCommand history and Agent-authenticated command claim/result updates. The
-local-process execution boundary will be expanded when command execution is implemented.
+credential storage, authenticated heartbeat/polling loops, persisted ServerInstance
+process configuration, owner-created ServerCommand history and Agent-authenticated
+command claim/result updates. The local-process execution boundary will be expanded when
+command execution is implemented.
 
 ## Data flow and trust boundaries
 
@@ -54,6 +55,12 @@ Registered Agent -> ASP.NET Core API -> PostgreSQL: claim/progress/result
   | oldest Pending command is claimed by one atomic PostgreSQL statement
   | bounded failure details are stored; raw messages are not logged or returned to users
 
+Registered Agent runtime
+  | per-request Agent credential; sequential heartbeat and claim loops
+  | bounded retry only for network, 408, 429 and 5xx failures
+  v
+ASP.NET Core API
+
 Future flow: API -> authenticated Agent -> stored allow-listed ServerInstance process operations
 ```
 
@@ -92,6 +99,9 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Cross-user command creation or history access | Command creation and history queries scope the ServerInstance through its Agent owner; missing and foreign IDs both return `404` | Future command-by-ID APIs must preserve the same owner scope |
 | Conflicting Start/Stop requests under concurrency | PostgreSQL partial unique index permits one `Pending`, `Claimed` or `Running` command per ServerInstance; its named unique violation becomes `409` | Cancellation and retry policy are deferred to Agent command processing |
 | Lost claim response or overlapping Agent polls | Claim locks the Agent row, re-delivers its existing `Claimed`/`Running` command, and a partial unique index permits only one such command per Agent | Lease expiry, abandonment and reassignment are deferred |
+| Temporary API outage creates a request storm | Heartbeat and polling retry only transient network/408/429/5xx failures up to three times with bounded exponential delay and jitter, then return to their normal cadence | Repeated outages remain visible in Agent logs; no central circuit breaker exists in MVP |
+| Revoked credential or invalid Agent contract retries forever | `401`/`403`, unexpected `4xx` and malformed claim responses are classified as non-retryable; both loops stop and the Agent host exits visibly | Operator must correct configuration or register again after credential revocation |
+| One Agent processes multiple claimed commands concurrently | Each loop is sequential and the Agent holds one claimed/recovery command in memory before any later claim | Durable execution handoff and completion are deferred to #29 |
 | Agent claims or updates another Agent's command | Claim route ID must equal the credential identity; every command update includes authenticated `agent_id`, and missing/foreign IDs both return `404` | A stolen credential retains its Agent authority until revoked |
 | Replayed, forged or clock-regressed command transition | Conditional updates require the exact predecessor state and nondecreasing timestamps; matching duplicates are idempotent and conflicts return `409` | API host clock synchronization remains an operational dependency |
 | Agent error discloses local details or exhausts storage | Failure code/message are required, trimmed and bounded; logs omit both details and user history omits the raw message | The Agent must use stable error codes and avoid unnecessary sensitive detail |
@@ -121,6 +131,10 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 - Persist at most one active (`Pending`, `Claimed` or `Running`) ServerCommand for a ServerInstance.
 - Persist at most one `Claimed` or `Running` ServerCommand for an Agent and re-deliver it
   before claiming another command.
+- Retry only transient Agent API failures with bounded delay; stop rather than retry an
+  authentication, configuration or contract failure indefinitely.
+- Do not overlap iterations of one Agent loop or claim another command while an in-memory
+  command is reserved for sequential processing.
 - Scope every Agent command transition by both command ID and authenticated Agent ID.
 - Reject invalid command transitions; accept only explicitly defined idempotent duplicates.
 - Never return a raw Agent command failure message to the user API.
