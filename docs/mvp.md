@@ -484,6 +484,23 @@ Integration-тесты должны использовать настоящий 
 
 EF Core InMemory не должен использоваться как замена интеграционным тестам PostgreSQL.
 
+Полный Windows end-to-end сценарий выполняется отдельно через `eng/verify-e2e.ps1`, потому
+что настоящий Agent использует DPAPI и Windows process APIs. Проверка создаёт чистый
+изолированный Compose project и безопасный пяти-минутный process fixture, затем доказывает:
+
+- registration и login пользователя, one-time Agent registration и heartbeat;
+- создание ServerInstance, реальный Start/Running/PID и Stop/Stopped;
+- повторные StartServer/StopServer без второго процесса и без ошибки;
+- сохранение command history и correlation ID;
+- одинаковый `404` для второго пользователя на чужих ресурсах;
+- rediscovery того же PID после Agent restart;
+- восстановление heartbeat и состояния после временной недоступности/API restart.
+
+Ручные шаги, ожидаемые ответы, cleanup и troubleshooting зафиксированы в
+`docs/e2e-validation.md`. Этот Windows-only прогон намеренно не входит в Linux CI;
+`eng/verify.ps1` остаётся канонической кроссплатформенной проверкой build, unit/integration,
+PostgreSQL migrations и Compose readiness.
+
 ## Docker Compose
 
 На этапе MVP через Docker Compose запускаются:
@@ -574,3 +591,10 @@ MVP считается готовым, когда:
 14. Пользователь не может управлять чужим Agent.
 15. Основные integration-тесты проходят.
 16. Повторная доставка команды не создаёт второй процесс.
+
+Все критерии 1–16 воспроизводимо проверяются `eng/verify-e2e.ps1`; ownership, persistence,
+concurrency и invalid-state cases дополнительно покрыты unit- и PostgreSQL integration-тестами
+из `eng/verify.ps1`. Проверка выявила и закрыла precision-gap restart identity: PostgreSQL
+хранит timestamp с точностью до микросекунды, поэтому Agent допускает только
+sub-microsecond loss при сравнении start time, продолжая точно сверять PID, executable path
+и process name.

@@ -80,6 +80,10 @@ function Start-AndVerifyCompose {
 
 $projectName = "serverpilot-verify-$([Guid]::NewGuid().ToString('N'))"
 $apiPort = Get-FreeTcpPort
+do {
+    $postgresPort = Get-FreeTcpPort
+}
+while ($postgresPort -eq $apiPort)
 $previousPostgreSqlPassword = [Environment]::GetEnvironmentVariable(
     "POSTGRES_PASSWORD",
     [EnvironmentVariableTarget]::Process)
@@ -88,6 +92,9 @@ $previousJwtSigningKey = [Environment]::GetEnvironmentVariable(
     [EnvironmentVariableTarget]::Process)
 $previousApiHostPort = [Environment]::GetEnvironmentVariable(
     "SERVERPILOT_API_HOST_PORT",
+    [EnvironmentVariableTarget]::Process)
+$previousPostgreSqlHostPort = [Environment]::GetEnvironmentVariable(
+    "SERVERPILOT_POSTGRES_HOST_PORT",
     [EnvironmentVariableTarget]::Process)
 
 try {
@@ -113,6 +120,10 @@ try {
         "SERVERPILOT_API_HOST_PORT",
         $apiPort.ToString([Globalization.CultureInfo]::InvariantCulture),
         [EnvironmentVariableTarget]::Process)
+    [Environment]::SetEnvironmentVariable(
+        "SERVERPILOT_POSTGRES_HOST_PORT",
+        $postgresPort.ToString([Globalization.CultureInfo]::InvariantCulture),
+        [EnvironmentVariableTarget]::Process)
 
     Invoke-Compose config --quiet
     Start-AndVerifyCompose -Build:(-not $SkipBuild)
@@ -136,6 +147,10 @@ finally {
     [Environment]::SetEnvironmentVariable(
         "SERVERPILOT_API_HOST_PORT",
         $previousApiHostPort,
+        [EnvironmentVariableTarget]::Process)
+    [Environment]::SetEnvironmentVariable(
+        "SERVERPILOT_POSTGRES_HOST_PORT",
+        $previousPostgreSqlHostPort,
         [EnvironmentVariableTarget]::Process)
 }
 

@@ -208,6 +208,7 @@ API
 
 - [`docs/product.md`](docs/product.md) — полное описание проекта и целевой архитектуры.
 - [`docs/mvp.md`](docs/mvp.md) — границы первой версии.
+- [`docs/e2e-validation.md`](docs/e2e-validation.md) — воспроизводимая Windows end-to-end проверка полного MVP и ручной сценарий.
 - [`docs/api-conventions.md`](docs/api-conventions.md) — контракты API, валидация, Problem Details и correlation ID.
 - [`docs/adr/0001-user-password-and-jwt-authentication.md`](docs/adr/0001-user-password-and-jwt-authentication.md) — решение по password hashing и JWT.
 - [`docs/adr/0002-one-time-agent-installation-tokens.md`](docs/adr/0002-one-time-agent-installation-tokens.md) — решение по одноразовым installation tokens.
@@ -266,8 +267,9 @@ Invoke-WebRequest http://127.0.0.1:8080/health/live
 Invoke-WebRequest http://127.0.0.1:8080/health/ready
 ```
 
-Порт API опубликован только на loopback и по умолчанию равен `8080`; при конфликте задайте
-`SERVERPILOT_API_HOST_PORT`. Windows Agent в локальном Compose-сценарии подключается к
+Порты опубликованы только на loopback: API по умолчанию использует `8080`, PostgreSQL —
+`5432`; при конфликте задайте `SERVERPILOT_API_HOST_PORT` или
+`SERVERPILOT_POSTGRES_HOST_PORT`. Windows Agent в локальном Compose-сценарии подключается к
 `http://127.0.0.1:8080/`. Для не-loopback deployment требуется HTTPS.
 
 Остановить окружение без удаления данных:
@@ -543,6 +545,18 @@ integration-тесты, проверку соответствия EF-модел�
 
 Integration-тесты используют Testcontainers и создают временный PostgreSQL-контейнер из образа `postgres:18.4-alpine`. На GitHub-hosted Ubuntu runner Docker уже доступен, поэтому отдельный PostgreSQL service container и credentials в workflow не нужны. Для локального запуска integration-тестов должен работать Docker Desktop или другой совместимый Docker daemon.
 
+Полная проверка настоящего Windows Agent и безопасного локального process fixture запускается
+отдельно, потому что DPAPI и Windows process identity недоступны Linux CI:
+
+```powershell
+./eng/verify-e2e.ps1
+```
+
+Она проверяет clean Compose startup, registration/login, heartbeat, Start/Stop, повторные
+команды, Agent/API restart recovery, временную недоступность API, command history и ownership
+isolation. Подробные требования, ожидаемые ответы, cleanup и troubleshooting приведены в
+[`docs/e2e-validation.md`](docs/e2e-validation.md).
+
 NuGet Audit явно включён для прямых и транзитивных зависимостей. Поскольку warnings считаются errors, найденная уязвимость завершает restore с ошибкой и остаётся видимой в логе job. При падении тестов CI сохраняет TRX-файлы как artifact на семь дней.
 
 Кеш NuGet намеренно не настроен: его следует добавлять только после измерения времени restore.
@@ -597,6 +611,6 @@ process identity после рестарта, сохраняет провере�
 выход как `Crashed`. Для offline Agent пользователь видит `Unreachable` вместе с последним
 reported snapshot, а не вымышленный `Stopped`.
 
-Следующая задача — #31: завершить structured logging и correlation по всему API/Agent flow.
-
-Текущая цель — реализовать минимальный рабочий вертикальный сценарий без преждевременного добавления сложной инфраструктуры.
+Минимальный вертикальный сценарий реализован и воспроизводимо проверяется через
+`eng/verify.ps1` и Windows-only `eng/verify-e2e.ps1`. Дальнейшая работа выбирается из
+post-MVP roadmap и не расширяет этот сценарий неявно.

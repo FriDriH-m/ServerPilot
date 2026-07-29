@@ -23,6 +23,36 @@ public sealed class ProcessIdentityPolicyTests
     }
 
     [Theory]
+    [InlineData(-9)]
+    [InlineData(9)]
+    public void MatchesStartTimeWithinPostgreSqlMicrosecondPrecision(int tickDifference)
+    {
+        ProcessIdentity expected = new(42, StartedAt, @"C:\Servers\server.exe", "server");
+        ProcessSnapshot actual = new(
+            42,
+            StartedAt.AddTicks(tickDifference),
+            @"C:\Servers\server.exe",
+            "server");
+
+        Assert.True(ProcessIdentityPolicy.Matches(expected, actual));
+    }
+
+    [Theory]
+    [InlineData(-10)]
+    [InlineData(10)]
+    public void RejectsStartTimeOutsidePostgreSqlMicrosecondPrecision(int tickDifference)
+    {
+        ProcessIdentity expected = new(42, StartedAt, @"C:\Servers\server.exe", "server");
+        ProcessSnapshot actual = new(
+            42,
+            StartedAt.AddTicks(tickDifference),
+            @"C:\Servers\server.exe",
+            "server");
+
+        Assert.False(ProcessIdentityPolicy.Matches(expected, actual));
+    }
+
+    [Theory]
     [InlineData(43, 0, @"C:\Servers\server.exe", "server")]
     [InlineData(42, 1, @"C:\Servers\server.exe", "server")]
     [InlineData(42, 0, @"C:\Servers\other.exe", "server")]

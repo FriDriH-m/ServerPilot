@@ -14,9 +14,11 @@ public sealed record ProcessSnapshot(
 
 public static class ProcessIdentityPolicy
 {
+    private const long PersistedTimestampPrecisionTicks = TimeSpan.TicksPerMicrosecond;
+
     public static bool Matches(ProcessIdentity expected, ProcessSnapshot actual) =>
         expected.ProcessId == actual.ProcessId &&
-        expected.StartedAtUtc == actual.StartedAtUtc &&
+        StartTimesMatch(expected.StartedAtUtc, actual.StartedAtUtc) &&
         PathsEqual(expected.ExecutablePath, actual.ExecutablePath) &&
         ProcessNamesEqual(expected.ProcessName, actual.ProcessName);
 
@@ -31,6 +33,10 @@ public static class ProcessIdentityPolicy
             left.Replace('/', '\\').TrimEnd('\\'),
             right.Replace('/', '\\').TrimEnd('\\'),
             StringComparison.OrdinalIgnoreCase);
+
+    private static bool StartTimesMatch(DateTimeOffset expected, DateTimeOffset actual) =>
+        Math.Abs(expected.ToUniversalTime().Ticks - actual.ToUniversalTime().Ticks) <
+        PersistedTimestampPrecisionTicks;
 
     private static string NormalizeProcessName(string value)
     {
