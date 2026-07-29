@@ -328,6 +328,34 @@ Authorization: Agent spac_<64 uppercase hex characters>
 следующий Agent-запрос получает `401`. Credential не имеет автоматического срока
 действия в MVP, поэтому HTTPS и безопасное локальное хранение в issue #26 обязательны.
 
+### Bootstrap и локальное хранение Agent credential
+
+`ServerPilot.Agent` запускается как консольный Worker. До старта фоновых циклов он
+валидирует конфигурацию, затем при первом запуске регистрируется через
+`POST /api/agents/register`. Одноразовый installation token задаётся только извне и
+нужен только пока нет сохранённого credential:
+
+```powershell
+$env:Agent__ApiBaseUrl = "https://localhost:5001/"
+$env:Agent__Name = "my-windows-agent"
+$env:Agent__InstallationToken = "spit_<installation-token>"
+$env:Agent__HeartbeatIntervalSeconds = "10"
+$env:Agent__CommandPollingIntervalSeconds = "5"
+dotnet run --project src/ServerPilot.Agent
+```
+
+Для локальной разработки допустим `http://localhost` или `http://127.0.0.1`; любой
+не-loopback URL должен использовать HTTPS. Token и выданный credential не записываются
+в `appsettings.json` и не логируются. После успешной регистрации credential вместе с
+Agent ID сохраняется атомарно в
+`%LOCALAPPDATA%\ServerPilot\agent-credential.dat`, зашифрованный Windows DPAPI для
+текущего пользователя. Последующие запуски используют это хранилище и не требуют token.
+
+Файл нельзя переносить на другую машину или запускать Agent под другим Windows
+пользователем: потребуется новый installation token. Если credential считается
+скомпрометированным, сначала отзовите его через API, затем удалите локальный файл и
+зарегистрируйте Agent заново.
+
 ### Heartbeat и доступность Agent
 
 Аутентифицированный Agent отправляет heartbeat через
@@ -448,14 +476,17 @@ dotnet ef database update --project src/ServerPilot.Infrastructure --startup-pro
 одноразовые Agent installation tokens, регистрация, отдельная аутентификация, heartbeat,
 пользовательские Agent queries, ServerInstance configuration/ownership, пользовательские
 Start/Stop endpoints, история ServerCommand и Agent endpoints атомарной выдачи, прогресса
-и результата команд. Реализована функциональная задача #25. После независимого аудита
-добавлены минимальные hardening-исправления: безопасная проверка Windows-путей со
-смешанными разделителями, защита process-critical конфигурации при активной команде,
-восстановление потерянного claim-response, cursor pagination истории, защита переходов
-при регрессии часов и PostgreSQL-инвариант одной `Claimed`/`Running` команды на Agent.
+и результата команд. Реализованы функциональные задачи #25 и #26. Agent теперь
+валидирует typed configuration до запуска фоновых циклов, регистрируется по installation
+token только при первом запуске и хранит выданный credential в Windows DPAPI-защищённом
+local storage текущего пользователя. После независимого аудита добавлены минимальные
+hardening-исправления: безопасная проверка Windows-путей со смешанными разделителями,
+защита process-critical конфигурации при активной команде, восстановление потерянного
+claim-response, cursor pagination истории, защита переходов при регрессии часов и
+PostgreSQL-инвариант одной `Claimed`/`Running` команды на Agent.
 
-Рекомендуемая следующая задача — #26: bootstrap Agent, typed configuration и безопасное
-локальное хранение выданного credential. Polling loop и выполнение процессов остаются в
-последующих задачах MVP.
+Следующие разблокированные задачи — #27 (heartbeat и polling loop) и #28 (безопасный
+process supervisor). Они независимы друг от друга после #26, но должны выполняться в
+изолированных worktree.
 
 Текущая цель — реализовать минимальный рабочий вертикальный сценарий без преждевременного добавления сложной инфраструктуры.
