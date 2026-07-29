@@ -2,9 +2,9 @@
 
 This lightweight model is updated when an active issue introduces a real trust
 boundary. It currently covers user authentication, one-time Agent installation tokens,
-Agent registration, revocable Agent credentials and persisted ServerInstance process
-configuration. The local-process execution boundary will be expanded when command
-execution is implemented.
+Agent registration, revocable Agent credentials, persisted ServerInstance process
+configuration and owner-created ServerCommand history. The local-process execution
+boundary will be expanded when command execution is implemented.
 
 ## Data flow and trust boundaries
 
@@ -38,6 +38,10 @@ User/client -> ASP.NET Core API -> PostgreSQL: owner-scoped Agent metadata query
 User/client -> ASP.NET Core API -> PostgreSQL: owner-scoped ServerInstance configuration
   | list response: safe metadata only; full paths/arguments only for the owner
   | stored configuration: target Agent + absolute path shape + bare process name
+
+User/client -> ASP.NET Core API -> PostgreSQL: owner-scoped ServerCommand request/history
+  | only StartServer or StopServer; one Pending/Claimed/Running command per ServerInstance
+  | response: command state, timestamps and safe error code; no raw Agent failure message
 
 Future flow: API -> authenticated Agent -> stored allow-listed ServerInstance process operations
 ```
@@ -73,6 +77,10 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Client clock forges or regresses liveness | Heartbeat has no client timestamp; server UTC conditionally advances `last_seen_at`, and PostgreSQL rejects values before registration | API host clock synchronization is an operational dependency |
 | Persisted availability becomes stale | `Online`/`Offline` is derived during reads from `last_seen_at` and a validated threshold; no boolean or scheduled status write exists | Status is a recent-contact signal, not proof that the local process is healthy |
 | Cross-user ServerInstance access | Create verifies ownership of the target Agent; list/get/update/delete scope through the Agent owner and foreign IDs return `404` | Future command endpoints must preserve the same ServerInstance ownership path |
+| Cross-user command creation or history access | Command creation and history queries scope the ServerInstance through its Agent owner; missing and foreign IDs both return `404` | Future command-by-ID APIs must preserve the same owner scope |
+| Conflicting Start/Stop requests under concurrency | PostgreSQL partial unique index permits one `Pending`, `Claimed` or `Running` command per ServerInstance; its named unique violation becomes `409` | Cancellation and retry policy are deferred to Agent command processing |
+| Agent error discloses local details in history | History responses expose only the bounded error code, never the raw error message | A future Agent must use stable, documented error codes |
+| Command history disappears with its ServerInstance | ServerInstance deletion requires no persisted command history and otherwise returns `409` | Retention and archival policy are outside the MVP |
 | Local paths or launch arguments disclosed broadly | List responses and structured logs exclude paths and arguments; full configuration is returned only to the owning user | The owner can retrieve their configuration, so clients must protect their own API credentials |
 | Path traversal or an API-side path check targets the wrong machine | API rejects `.`/`..` and device-path segments, validates bounded Windows/UNC path shape only, and does not inspect a remote host | A future Agent must validate the stored configuration before process execution |
 | Active process configuration removed during management | Owner and inactive-state predicates are combined in one conditional delete; active states return `409` | A future command/state transition must handle a deleted inactive instance by verifying existence atomically |
@@ -91,6 +99,9 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 - Never trust a client-provided timestamp for Agent availability.
 - Scope every Agent read to the authenticated user before projecting metadata.
 - Scope every ServerInstance operation to the authenticated owner of its target Agent.
+- Scope every ServerCommand request and history query to the authenticated owner of its ServerInstance.
+- Persist at most one active (`Pending`, `Claimed` or `Running`) ServerCommand for a ServerInstance.
+- Never return a raw Agent command failure message to the user API.
 - Never expose ServerInstance executable paths, working directories or arguments in a list response or structured log.
 - A user cannot delete a ServerInstance while its persisted process state is active.
 - The future Agent may execute only a stored ServerInstance configuration, never a command path or arguments supplied directly by a command request.

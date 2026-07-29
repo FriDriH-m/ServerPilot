@@ -90,26 +90,36 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
             int deleted = await OwnedByUser(userId)
                 .Where(serverInstance =>
                     serverInstance.Id == id &&
-                    !ActiveStatuses.Contains(serverInstance.Status))
+                    !ActiveStatuses.Contains(serverInstance.Status) &&
+                    !dbContext.ServerCommands.Any(command =>
+                        command.ServerInstanceId == serverInstance.Id))
                 .ExecuteDeleteAsync(cancellationToken);
             if (deleted == 1)
             {
                 return DeleteServerInstanceStatus.Succeeded;
             }
 
-            ServerInstanceStatus? currentStatus = await OwnedByUser(userId)
+            ServerInstanceDeletionState? currentState = await OwnedByUser(userId)
                 .AsNoTracking()
                 .Where(serverInstance => serverInstance.Id == id)
-                .Select(serverInstance => (ServerInstanceStatus?)serverInstance.Status)
+                .Select(serverInstance => new ServerInstanceDeletionState(
+                    serverInstance.Status,
+                    dbContext.ServerCommands.Any(command =>
+                        command.ServerInstanceId == serverInstance.Id)))
                 .SingleOrDefaultAsync(cancellationToken);
-            if (currentStatus is null)
+            if (currentState is null)
             {
                 return DeleteServerInstanceStatus.NotFound;
             }
 
-            if (ActiveStatuses.Contains(currentStatus.Value))
+            if (ActiveStatuses.Contains(currentState.Status))
             {
                 return DeleteServerInstanceStatus.Active;
+            }
+
+            if (currentState.HasCommandHistory)
+            {
+                return DeleteServerInstanceStatus.HasCommandHistory;
             }
         }
 
@@ -149,4 +159,8 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
             serverInstance.LastProcessId,
             serverInstance.CreatedAt,
             serverInstance.UpdatedAt);
+
+    private sealed record ServerInstanceDeletionState(
+        ServerInstanceStatus Status,
+        bool HasCommandHistory);
 }

@@ -366,6 +366,17 @@ ID или изменение. API проверяет базовую форму �
 на удалённой машине — это обязанность Agent при выполнении будущей команды. Нельзя
 удалить экземпляр в состояниях `Starting`, `Running` или `Stopping`: API вернёт `409`.
 
+### Команды ServerCommand
+
+Пользователь с JWT создаёт команды только для принадлежащего ему `ServerInstance` через
+`POST /api/server-instances/{id}/commands/start` и
+`POST /api/server-instances/{id}/commands/stop`; `GET` по тому же ресурсу возвращает
+историю от новых к старым. В один момент для экземпляра допустима только одна активная
+команда в состояниях `Pending`, `Claimed` или `Running`: конкурирующий запрос получает
+`409`. История возвращает статусы, временные метки и безопасный код ошибки без
+необработанного сообщения Agent. Экземпляр с историей команд не удаляется и также
+возвращает `409`, чтобы не потерять историю.
+
 ## Continuous integration
 
 Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) запускается для каждого pull request в `main` и каждого push в `main`.
@@ -410,7 +421,8 @@ dotnet ef database update --project src/ServerPilot.Infrastructure --startup-pro
 
 Завершены foundation, PostgreSQL, API conventions, CI, пользовательская JWT-аутентификация,
 одноразовые Agent installation tokens, регистрация, отдельная аутентификация, heartbeat,
-пользовательские Agent queries и ServerInstance configuration/ownership. Следующая
-функциональная задача — #23, доменная модель ServerCommand и конечный автомат состояний.
+пользовательские Agent queries, ServerInstance configuration/ownership и доменная модель
+ServerCommand с конечным автоматом состояний. Текущая функциональная задача — #24,
+пользовательские endpoints создания Start/Stop-команд и просмотра истории команд.
 
 Текущая цель — реализовать минимальный рабочий вертикальный сценарий без преждевременного добавления сложной инфраструктуры.
