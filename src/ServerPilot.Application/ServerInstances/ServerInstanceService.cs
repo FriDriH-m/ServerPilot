@@ -1,9 +1,11 @@
+using ServerPilot.Application.Agents;
 using ServerPilot.Domain.ServerInstances;
 
 namespace ServerPilot.Application.ServerInstances;
 
 public sealed class ServerInstanceService(
     IServerInstanceRepository serverInstances,
+    AgentAvailabilityOptions availabilityOptions,
     TimeProvider timeProvider)
 {
     public async Task<ServerInstanceCreateResult> CreateAsync(
@@ -14,10 +16,13 @@ public sealed class ServerInstanceService(
     {
         ValidateUserId(userId);
         ArgumentNullException.ThrowIfNull(configuration);
-        if (agentId == Guid.Empty || !await serverInstances.IsAgentOwnedByUserAsync(
+        ServerInstanceAgentDetails? agent = agentId == Guid.Empty
+            ? null
+            : await serverInstances.FindAgentOwnedByUserAsync(
                 agentId,
                 userId,
-                cancellationToken))
+                cancellationToken);
+        if (agent is null)
         {
             return new ServerInstanceCreateResult(
                 ServerInstanceCreateStatus.AgentNotFound,
@@ -33,10 +38,10 @@ public sealed class ServerInstanceService(
 
         return new ServerInstanceCreateResult(
             ServerInstanceCreateStatus.Succeeded,
-            MapDetails(serverInstance));
+            ApplyAvailability(MapDetails(serverInstance, agent.LastSeenAt), timeProvider.GetUtcNow()));
     }
 
-    public Task<IReadOnlyList<ServerInstanceListItem>> ListAsync(
+    public async Task<IReadOnlyList<ServerInstanceListItem>> ListAsync(
         Guid userId,
         int page,
         int limit,
@@ -44,28 +49,36 @@ public sealed class ServerInstanceService(
     {
         ValidateUserId(userId);
         ValidatePagination(page, limit);
-        return serverInstances.ListOwnedAsync(
+        IReadOnlyList<ServerInstanceListItem> items = await serverInstances.ListOwnedAsync(
             userId,
             (page - 1) * limit,
             limit,
             cancellationToken);
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        return items.Select(item => ApplyAvailability(item, now)).ToArray();
     }
 
-    public Task<ServerInstanceDetails?> GetAsync(
+    public async Task<ServerInstanceDetails?> GetAsync(
         Guid id,
         Guid userId,
         CancellationToken cancellationToken)
     {
         if (id == Guid.Empty)
         {
-            return Task.FromResult<ServerInstanceDetails?>(null);
+            return null;
         }
 
         ValidateUserId(userId);
-        return serverInstances.FindOwnedAsync(id, userId, cancellationToken);
+        ServerInstanceDetails? details = await serverInstances.FindOwnedAsync(
+            id,
+            userId,
+            cancellationToken);
+        return details is null
+            ? null
+            : ApplyAvailability(details, timeProvider.GetUtcNow());
     }
 
-    public Task<UpdateServerInstanceResult> UpdateAsync(
+    public async Task<UpdateServerInstanceResult> UpdateAsync(
         Guid id,
         Guid userId,
         ServerInstanceConfiguration configuration,
@@ -73,19 +86,27 @@ public sealed class ServerInstanceService(
     {
         if (id == Guid.Empty)
         {
-            return Task.FromResult(new UpdateServerInstanceResult(
+            return new UpdateServerInstanceResult(
                 UpdateServerInstanceStatus.NotFound,
-                null));
+                null);
         }
 
         ValidateUserId(userId);
         ArgumentNullException.ThrowIfNull(configuration);
-        return serverInstances.UpdateOwnedAsync(
+        UpdateServerInstanceResult result = await serverInstances.UpdateOwnedAsync(
             id,
             userId,
             configuration,
             timeProvider.GetUtcNow(),
             cancellationToken);
+        return result.ServerInstance is null
+            ? result
+            : result with
+            {
+                ServerInstance = ApplyAvailability(
+                    result.ServerInstance,
+                    timeProvider.GetUtcNow()),
+            };
     }
 
     public Task<DeleteServerInstanceStatus> DeleteAsync(
@@ -102,7 +123,9 @@ public sealed class ServerInstanceService(
         return serverInstances.DeleteOwnedAsync(id, userId, cancellationToken);
     }
 
-    private static ServerInstanceDetails MapDetails(ServerInstance serverInstance) =>
+    private static ServerInstanceDetails MapDetails(
+        ServerInstance serverInstance,
+        DateTimeOffset? agentLastSeenAt) =>
         new(
             serverInstance.Id,
             serverInstance.AgentId,
@@ -112,9 +135,44 @@ public sealed class ServerInstanceService(
             serverInstance.WorkingDirectory,
             serverInstance.ProcessName,
             serverInstance.Status,
+            serverInstance.Status,
             serverInstance.LastProcessId,
+            serverInstance.LastProcessStartedAt,
+            serverInstance.LastStatusReportedAt,
+            false,
+            agentLastSeenAt,
             serverInstance.CreatedAt,
             serverInstance.UpdatedAt);
+
+    private ServerInstanceDetails ApplyAvailability(
+        ServerInstanceDetails serverInstance,
+        DateTimeOffset now)
+    {
+        bool stale = AgentAvailabilityEvaluator.Evaluate(
+            serverInstance.AgentLastSeenAt,
+            now,
+            availabilityOptions.OfflineThreshold) == AgentAvailabilityStatus.Offline;
+        return serverInstance with
+        {
+            Status = stale ? ServerInstanceStatus.Unreachable : serverInstance.ReportedStatus,
+            IsStateStale = stale,
+        };
+    }
+
+    private ServerInstanceListItem ApplyAvailability(
+        ServerInstanceListItem serverInstance,
+        DateTimeOffset now)
+    {
+        bool stale = AgentAvailabilityEvaluator.Evaluate(
+            serverInstance.AgentLastSeenAt,
+            now,
+            availabilityOptions.OfflineThreshold) == AgentAvailabilityStatus.Offline;
+        return serverInstance with
+        {
+            Status = stale ? ServerInstanceStatus.Unreachable : serverInstance.ReportedStatus,
+            IsStateStale = stale,
+        };
+    }
 
     private static void ValidateUserId(Guid userId)
     {

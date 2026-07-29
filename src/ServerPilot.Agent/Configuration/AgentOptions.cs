@@ -16,9 +16,14 @@ public sealed class AgentOptions
 
     public int CommandPollingIntervalSeconds { get; init; } = 5;
 
+    public int ProcessReconciliationIntervalSeconds { get; init; } = 10;
+
     public TimeSpan HeartbeatInterval => TimeSpan.FromSeconds(HeartbeatIntervalSeconds);
 
     public TimeSpan CommandPollingInterval => TimeSpan.FromSeconds(CommandPollingIntervalSeconds);
+
+    public TimeSpan ProcessReconciliationInterval =>
+        TimeSpan.FromSeconds(ProcessReconciliationIntervalSeconds);
 
     public void Validate()
     {
@@ -41,6 +46,9 @@ public sealed class AgentOptions
 
         ValidateInterval(HeartbeatIntervalSeconds, nameof(HeartbeatIntervalSeconds));
         ValidateInterval(CommandPollingIntervalSeconds, nameof(CommandPollingIntervalSeconds));
+        ValidateInterval(
+            ProcessReconciliationIntervalSeconds,
+            nameof(ProcessReconciliationIntervalSeconds));
     }
 
     public Uri GetApiBaseUri()

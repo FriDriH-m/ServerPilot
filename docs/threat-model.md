@@ -6,7 +6,8 @@ Agent registration, revocable Agent credentials, Windows DPAPI-protected local A
 credential storage, authenticated heartbeat/polling loops, persisted ServerInstance
 process configuration, owner-created ServerCommand history and Agent-authenticated
 command claim/result updates, the Windows Agent local-process supervisor and the staged,
-idempotent command executor. Restart reconciliation remains in issue #30.
+idempotent command executor, persisted process identity, restart reconciliation and
+offline ServerInstance semantics.
 
 ## Data flow and trust boundaries
 
@@ -56,15 +57,20 @@ Registered Agent -> ASP.NET Core API -> PostgreSQL: claim/progress/result
   | response includes that command's stored ServerInstance process configuration
   | bounded failure details are stored; raw messages are not logged or returned to users
 
+Registered Agent -> ASP.NET Core API -> PostgreSQL: process-state reconciliation
+  | paginated assignments and reports are scoped to the credential Agent ID
+  | persisted state: reported status + PID + process start time + server receipt time
+  | user view derives Unreachable from Agent heartbeat and preserves the stale snapshot
+
 Registered Agent runtime
-  | per-request Agent credential; sequential heartbeat and claim loops
+  | per-request Agent credential; sequential heartbeat, claim and reconciliation loops
   | bounded retry only for network, 408, 429 and 5xx failures
   v
 ASP.NET Core API
 
 Agent command executor
-  | Running transition -> one local action -> actual-state inspection -> terminal report
-  | transient terminal-report failure reuses the cached local outcome, not the action
+  | Running transition -> one local action -> actual-state inspection -> state report
+  | terminal report follows; transient retries reuse the cached local outcome
   v
 Process supervisor boundary
   | stored native .exe configuration only; no shell or command-payload executable
@@ -113,14 +119,19 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | One Agent processes multiple claimed commands concurrently | The polling loop keeps one staged work item until its terminal report succeeds and does not claim another command meanwhile | Multi-command parallelism is intentionally outside the MVP |
 | Agent claims or updates another Agent's command | Claim route ID must equal the credential identity; every command update includes authenticated `agent_id`, and missing/foreign IDs both return `404` | A stolen credential retains its Agent authority until revoked |
 | Replayed, forged or clock-regressed command transition | Conditional updates require the exact predecessor state and nondecreasing timestamps; matching duplicates are idempotent and conflicts return `409` | API host clock synchronization remains an operational dependency |
-| Lost terminal result response repeats a process side effect | The work item records the verified local outcome before `/complete` or `/fail`; later transient retries send only the cached report | Agent restart before terminal reporting requires the recovery work in #30 |
+| Lost state or terminal result response repeats a process side effect | The work item records the verified local outcome before state and terminal reporting; later transient retries send only cached reports | An Agent crash before any durable state report can leave an ambiguous external process that is not auto-adopted |
 | Unknown or expanded command type reaches local execution | Claim deserialization accepts exact `StartServer` and `StopServer` values only; unsupported values stop at the protocol boundary | A future command type requires an explicit contract and executor decision |
 | Agent error discloses local details or exhausts storage | Failure code/message are required, trimmed and bounded; logs omit both details and user history omits the raw message | The Agent must use stable error codes and avoid unnecessary sensitive detail |
 | Command history disappears with its ServerInstance | ServerInstance deletion requires no persisted command history and otherwise returns `409` | Retention and archival policy are outside the MVP |
 | Local paths or launch arguments disclosed broadly | List/history responses and structured logs exclude paths and arguments; full configuration is returned only to the owner and the authenticated target Agent with its claimed command | The owner and target Agent legitimately need the configuration and must protect their credentials |
 | Path traversal or an API-side path check targets the wrong machine | API validates bounded Windows/UNC path shape; Agent repeats safe absolute-path checks and verifies local executable/working-directory existence immediately before launch | Symlink/reparse-point policy is not expanded beyond the exact executable identity check in the MVP |
 | Stored configuration invokes a shell or script | The supervisor accepts a matching native `.exe` only and uses `UseShellExecute = false`; it never invokes `cmd.exe`, PowerShell or command-payload paths | Purpose-built game launchers require a separate bounded decision; `.bat` is rejected today |
-| Reused or stale PID terminates an unrelated process | Supervisor identity includes PID, UTC start time, executable path and normalized process name; identity is re-read immediately before graceful or forced signals | Durable recovery after Agent restart remains in #30 |
+| Reused or stale PID terminates an unrelated process | PostgreSQL persists PID plus process start time; after restart the supervisor also matches executable path and normalized process name before adopting or signalling it | A process without a previously persisted complete identity is intentionally not auto-adopted |
+| Agent reports state for another Agent's server | Assignment routes require the credential Agent ID to equal the route, and state writes filter by both Agent ID and ServerInstance ID under a row lock | A stolen credential retains authority over its own assigned servers until revoked |
+| Offline Agent fabricates a current stopped/running state | User reads derive `Unreachable` from heartbeat freshness while retaining `ReportedStatus`, PID and report time as stale data; no offline job overwrites process state | The last snapshot can remain stale until the Agent reconnects |
+| Process inspection failure is mistaken for stopped | Access denied and other inspection failures produce no state report; only a verified missing/mismatched previously Running identity becomes `Crashed` | Repeated inspection failures remain an operational alert, not a definitive state |
+| Command execution races periodic reconciliation | Both operations share one Agent-side gate, and successful Start/Stop reports verified state before the terminal command result | Reconciliation is intentionally sequential in the MVP |
+| Agent and API clocks differ | API receipt time orders reports; Agent process start time is identity data and is not ordered against the API clock | Operators still need sane clocks for diagnostics and command timestamps |
 | Hung process blocks Agent command execution indefinitely | Graceful and forced waits have separate bounds; the executor converts a final timeout into a safe bounded command failure | Long-running command cancellation policy remains minimal in the MVP |
 | Active process configuration removed during management | Owner and inactive-state predicates are combined in one conditional delete; active states return `409` | A future command/state transition must handle a deleted inactive instance by verifying existence atomically |
 | Stored process configuration changes after a command is created | Process-critical updates return `409` while the process or a command is active; update and command creation serialize on the ServerInstance row | Configuration revisions and snapshots remain deferred |
@@ -151,6 +162,12 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
   command is reserved for sequential processing.
 - Record a local process outcome before terminal reporting and never repeat that process
   action merely because its `/complete` or `/fail` response was lost.
+- Persist process state only from the authenticated target Agent, scoped by both Agent and
+  ServerInstance IDs; user commands never assert actual process state.
+- Require PID plus process start time for `Running`; clear both for `Stopped` and `Crashed`.
+- Derive `Unreachable` from Agent heartbeat freshness without overwriting the last reported
+  process state.
+- Do not begin command polling after Agent startup until assignment reconciliation succeeds.
 - Scope every Agent command transition by both command ID and authenticated Agent ID.
 - Reject invalid command transitions; accept only explicitly defined idempotent duplicates.
 - Never return a raw Agent command failure message to the user API.

@@ -1,18 +1,12 @@
 namespace ServerPilot.Api.Contracts.ServerInstances;
 
-public sealed record ServerInstanceResponse(
+public sealed record AgentServerInstanceResponse(
     Guid Id,
-    Guid AgentId,
-    string Name,
     string ExecutablePath,
     string Arguments,
     string WorkingDirectory,
     string ProcessName,
-    string Status,
     string ReportedStatus,
     int? LastProcessId,
     DateTimeOffset? LastProcessStartedAt,
-    DateTimeOffset? LastStatusReportedAt,
-    bool IsStateStale,
-    DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset? LastStatusReportedAt);

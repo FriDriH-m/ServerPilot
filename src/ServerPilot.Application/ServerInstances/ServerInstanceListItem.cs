@@ -7,6 +7,11 @@ public sealed record ServerInstanceListItem(
     Guid AgentId,
     string Name,
     ServerInstanceStatus Status,
+    ServerInstanceStatus ReportedStatus,
     int? LastProcessId,
+    DateTimeOffset? LastProcessStartedAt,
+    DateTimeOffset? LastStatusReportedAt,
+    bool IsStateStale,
+    DateTimeOffset? AgentLastSeenAt,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

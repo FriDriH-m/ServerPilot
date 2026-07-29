@@ -218,6 +218,7 @@ API
 - [`docs/adr/0007-agent-heartbeat-and-command-polling.md`](docs/adr/0007-agent-heartbeat-and-command-polling.md) — решение по Agent heartbeat, polling и ограниченным retry.
 - [`docs/adr/0008-safe-local-process-supervision.md`](docs/adr/0008-safe-local-process-supervision.md) — решение по безопасной границе запуска и остановки локального процесса.
 - [`docs/adr/0009-idempotent-agent-command-execution.md`](docs/adr/0009-idempotent-agent-command-execution.md) — решение по staged-выполнению команд и retry без повторения process action.
+- [`docs/adr/0010-agent-process-state-reconciliation.md`](docs/adr/0010-agent-process-state-reconciliation.md) — решение по Agent-authoritative process state, safe restart rediscovery и offline semantics.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -344,6 +345,7 @@ $env:Agent__Name = "my-windows-agent"
 $env:Agent__InstallationToken = "spit_<installation-token>"
 $env:Agent__HeartbeatIntervalSeconds = "10"
 $env:Agent__CommandPollingIntervalSeconds = "5"
+$env:Agent__ProcessReconciliationIntervalSeconds = "10"
 dotnet run --project src/ServerPilot.Agent
 ```
 
@@ -364,7 +366,8 @@ Agent ID сохраняется атомарно в
 После bootstrap Agent использует сохранённый credential в заголовке `Authorization`
 каждого запроса и запускает независимые последовательные циклы для
 `POST /api/agents/{id}/heartbeat` и
-`POST /api/agents/{id}/commands/claim-next`. Следующая итерация начинается только
+`POST /api/agents/{id}/commands/claim-next`, а также периодическую сверку назначенных
+ServerInstance через Agent-only list/status endpoints. Следующая итерация начинается только
 после завершения предыдущего запроса и задержки, поэтому медленный API не создаёт
 перекрывающихся heartbeat или claim.
 
@@ -383,8 +386,14 @@ Agent ID сохраняется атомарно в
 В памяти одновременно находится только один staged work item. Если response на
 `/complete` или `/fail` потерян, Agent повторяет только terminal report с тем же
 Correlation ID, но не process action. Следующая команда не запрашивается, пока текущий
-result не принят API. Rediscovery после рестарта Agent и persisted actual state остаются
-задачей #30.
+result не принят API. Успешный Start/Stop сначала отправляет проверенное состояние процесса,
+а затем terminal command result; потерянный state response повторяет только cached report.
+
+Command polling не начинается до первой успешной сверки после запуска Agent. Для ранее
+зафиксированного `Running` Agent восстанавливает supervisor из persisted PID и UTC-времени
+старта и принимает процесс только после совпадения полного identity. Периодическая проверка
+переводит исчезнувший ранее `Running` процесс в `Crashed`; ошибка inspection не подменяется
+состоянием `Stopped`.
 
 ### Безопасный process supervisor Agent
 
@@ -397,7 +406,8 @@ Agent отслеживает PID вместе с UTC-временем запус
 Перед каждой остановкой identity проверяется заново: stale/reused PID не получает signal.
 Сначала предпринимается graceful stop с ограниченным ожиданием, после чего допустим
 явный принудительный fallback с отдельным timeout и структурированным логом без путей и
-аргументов. Командный polling будет связан с supervisor в #29.
+аргументов. Command execution и reconciliation используют один gate, поэтому intentional
+stop не может быть ошибочно классифицирован параллельной проверкой как crash.
 
 ### Heartbeat и доступность Agent
 
@@ -443,6 +453,16 @@ ID или изменение. API проверяет базовую форму �
 обычное переименование экземпляра при этом разрешено. При проверке пути `/` и `\`
 сначала приводятся к одной форме, поэтому device namespace нельзя скрыть смешанными
 разделителями.
+
+Фактическое состояние сообщает только аутентифицированный целевой Agent через
+`POST /api/agents/{agentId}/server-instances/{serverInstanceId}/status`. API сохраняет
+reported status, PID, время старта процесса и серверное время получения отчёта. Конфигурация
+и последнее identity выдаются этому же Agent постранично через
+`GET /api/agents/{agentId}/server-instances`; чужие Agent/ServerInstance возвращают `404`.
+
+Пользовательский `Status` является effective view: если heartbeat owning Agent устарел,
+он равен `Unreachable`, а `ReportedStatus`, PID и `LastStatusReportedAt` остаются последним
+известным, явно stale снимком. Offline никогда не записывает фиктивный `Stopped`.
 
 ### Команды ServerCommand
 
@@ -519,7 +539,7 @@ dotnet ef database update --project src/ServerPilot.Infrastructure --startup-pro
 одноразовые Agent installation tokens, регистрация, отдельная аутентификация, heartbeat,
 пользовательские Agent queries, ServerInstance configuration/ownership, пользовательские
 Start/Stop endpoints, история ServerCommand и Agent endpoints атомарной выдачи, прогресса
-и результата команд. Реализованы функциональные задачи #25–#29. Agent теперь
+и результата команд. Реализованы функциональные задачи #25–#30. Agent теперь
 валидирует typed configuration до запуска фоновых циклов, регистрируется по installation
 token только при первом запуске и хранит выданный credential в Windows DPAPI-защищённом
 local storage текущего пользователя, отправляет heartbeat и последовательно получает
@@ -537,7 +557,11 @@ Polling loop связан с supervisor через staged command executor: API 
 конфигурацию только целевому Agent, `StartServer`/`StopServer` выполняются один раз и
 проверяются inspection, а потерянный terminal response не повторяет локальное действие.
 
-Следующая задача — #30: периодическая сверка фактического состояния, persisted PID/status,
-rediscovery после рестарта Agent и обнаружение неожиданного завершения процесса.
+Agent периодически получает назначенные ServerInstance, безопасно восстанавливает persisted
+process identity после рестарта, сохраняет проверенные PID/status и обнаруживает неожиданный
+выход как `Crashed`. Для offline Agent пользователь видит `Unreachable` вместе с последним
+reported snapshot, а не вымышленный `Stopped`.
+
+Следующая задача — #31: завершить structured logging и correlation по всему API/Agent flow.
 
 Текущая цель — реализовать минимальный рабочий вертикальный сценарий без преждевременного добавления сложной инфраструктуры.

@@ -3,12 +3,14 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using ServerPilot.Agent.Credentials;
+using ServerPilot.Agent.Processes;
 
 namespace ServerPilot.Agent.Api;
 
 public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
 {
     private const string CorrelationIdHeaderName = "X-Correlation-ID";
+    private const int ServerInstancePageSize = 100;
 
     public async Task SendHeartbeatAsync(
         AgentCredential credential,
@@ -20,6 +22,68 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
             credential);
         using HttpResponseMessage response = await httpClient.SendAsync(request, cancellationToken);
 
+        EnsureStatus(response, HttpStatusCode.NoContent);
+    }
+
+    public async Task<IReadOnlyList<AssignedAgentServerInstance>> ListServerInstancesAsync(
+        AgentCredential credential,
+        CancellationToken cancellationToken)
+    {
+        List<AssignedAgentServerInstance> items = [];
+        for (int page = 1; ; page++)
+        {
+            using HttpRequestMessage request = CreateRequest(
+                HttpMethod.Get,
+                $"api/agents/{credential.AgentId}/server-instances?page={page}",
+                credential);
+            using HttpResponseMessage response = await httpClient.SendAsync(
+                request,
+                cancellationToken);
+            EnsureStatus(response, HttpStatusCode.OK);
+
+            AgentServerInstanceResponse[] pageItems;
+            try
+            {
+                pageItems = await response.Content.ReadFromJsonAsync<AgentServerInstanceResponse[]>(
+                    cancellationToken) ?? [];
+            }
+            catch (JsonException exception)
+            {
+                throw new AgentApiException(
+                    "Agent ServerInstance response has an invalid JSON payload.",
+                    AgentApiFailureKind.Configuration,
+                    exception);
+            }
+
+            foreach (AgentServerInstanceResponse item in pageItems)
+            {
+                items.Add(MapServerInstance(item));
+            }
+
+            if (pageItems.Length < ServerInstancePageSize)
+            {
+                return items;
+            }
+        }
+    }
+
+    public async Task ReportServerInstanceStateAsync(
+        AgentCredential credential,
+        Guid serverInstanceId,
+        AgentProcessStateReport report,
+        CancellationToken cancellationToken)
+    {
+        using HttpRequestMessage request = CreateRequest(
+            HttpMethod.Post,
+            $"api/agents/{credential.AgentId}/server-instances/{serverInstanceId}/status",
+            credential);
+        request.Content = JsonContent.Create(new
+        {
+            Status = report.Status.ToString(),
+            ProcessId = report.Identity?.ProcessId,
+            ProcessStartedAt = report.Identity?.StartedAtUtc,
+        });
+        using HttpResponseMessage response = await httpClient.SendAsync(request, cancellationToken);
         EnsureStatus(response, HttpStatusCode.NoContent);
     }
 
@@ -177,6 +241,54 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
         }
     }
 
+    private static AssignedAgentServerInstance MapServerInstance(
+        AgentServerInstanceResponse response)
+    {
+        if (response.Id == Guid.Empty ||
+            string.IsNullOrWhiteSpace(response.ExecutablePath) ||
+            response.Arguments is null ||
+            string.IsNullOrWhiteSpace(response.WorkingDirectory) ||
+            string.IsNullOrWhiteSpace(response.ProcessName) ||
+            !Enum.TryParse(
+                response.ReportedStatus,
+                ignoreCase: false,
+                out AgentServerInstanceStatus status) ||
+            !Enum.IsDefined(status))
+        {
+            throw new AgentApiException(
+                "Agent ServerInstance response is missing required fields.",
+                AgentApiFailureKind.Configuration);
+        }
+
+        bool validRunningIdentity = response.LastProcessId is > 0 &&
+            response.LastProcessStartedAt.HasValue;
+        bool validEmptyIdentity = response.LastProcessId is null &&
+            response.LastProcessStartedAt is null;
+        if ((status == AgentServerInstanceStatus.Running && !validRunningIdentity) ||
+            (status != AgentServerInstanceStatus.Running && !validEmptyIdentity))
+        {
+            throw new AgentApiException(
+                "Agent ServerInstance response has an invalid process identity.",
+                AgentApiFailureKind.Configuration);
+        }
+
+        return new AssignedAgentServerInstance(
+            response.Id,
+            response.ExecutablePath,
+            response.Arguments,
+            response.WorkingDirectory,
+            response.ProcessName,
+            status,
+            validRunningIdentity
+                ? new ProcessIdentity(
+                    response.LastProcessId!.Value,
+                    response.LastProcessStartedAt!.Value,
+                    response.ExecutablePath,
+                    response.ProcessName)
+                : null,
+            response.LastStatusReportedAt);
+    }
+
     private sealed class ClaimNextResponse
     {
         public Guid Id { get; init; }
@@ -203,6 +315,27 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
         public string? WorkingDirectory { get; init; }
 
         public string? ProcessName { get; init; }
+    }
+
+    private sealed class AgentServerInstanceResponse
+    {
+        public Guid Id { get; init; }
+
+        public string? ExecutablePath { get; init; }
+
+        public string? Arguments { get; init; }
+
+        public string? WorkingDirectory { get; init; }
+
+        public string? ProcessName { get; init; }
+
+        public string? ReportedStatus { get; init; }
+
+        public int? LastProcessId { get; init; }
+
+        public DateTimeOffset? LastProcessStartedAt { get; init; }
+
+        public DateTimeOffset? LastStatusReportedAt { get; init; }
     }
 
     private sealed record FailCommandRequest(string ErrorCode, string ErrorMessage);

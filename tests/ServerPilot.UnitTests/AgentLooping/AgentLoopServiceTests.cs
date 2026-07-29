@@ -5,6 +5,7 @@ using ServerPilot.Agent.Configuration;
 using ServerPilot.Agent.Credentials;
 using ServerPilot.Agent.Execution;
 using ServerPilot.Agent.Looping;
+using ServerPilot.Agent.Processes;
 
 namespace ServerPilot.UnitTests.AgentLooping;
 
@@ -63,6 +64,7 @@ public sealed class AgentLoopServiceTests
             new AgentRetryExecutor(delay),
             new PeriodicAgentLoop(delay),
             commandExecutor ?? new BlockingCommandExecutor(),
+            new SuccessfulReconciler(),
             NullLogger<AgentLoopService>.Instance);
     }
 
@@ -92,6 +94,17 @@ public sealed class AgentLoopServiceTests
 
         public Task SendHeartbeatAsync(AgentCredential credential, CancellationToken cancellationToken) =>
             Task.CompletedTask;
+
+        public Task<IReadOnlyList<AssignedAgentServerInstance>> ListServerInstancesAsync(
+            AgentCredential credential,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<AssignedAgentServerInstance>>([]);
+
+        public Task ReportServerInstanceStateAsync(
+            AgentCredential credential,
+            Guid serverInstanceId,
+            AgentProcessStateReport report,
+            CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task<ClaimedAgentCommand?> ClaimNextCommandAsync(
             AgentCredential credential,
@@ -130,6 +143,17 @@ public sealed class AgentLoopServiceTests
             return Task.FromException(new AgentApiException(HttpStatusCode.Unauthorized));
         }
 
+        public Task<IReadOnlyList<AssignedAgentServerInstance>> ListServerInstancesAsync(
+            AgentCredential credential,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<AssignedAgentServerInstance>>([]);
+
+        public Task ReportServerInstanceStateAsync(
+            AgentCredential credential,
+            Guid serverInstanceId,
+            AgentProcessStateReport report,
+            CancellationToken cancellationToken) => Task.CompletedTask;
+
         public Task<ClaimedAgentCommand?> ClaimNextCommandAsync(
             AgentCredential credential,
             CancellationToken cancellationToken) =>
@@ -166,6 +190,13 @@ public sealed class AgentLoopServiceTests
             ExecutionStarted.TrySetResult(true);
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         }
+    }
+
+    private sealed class SuccessfulReconciler : IAgentProcessStateReconciler
+    {
+        public Task ReconcileAsync(
+            AgentCredential credential,
+            CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class BlockingAgentDelay(int requiredEntries) : IAgentDelay

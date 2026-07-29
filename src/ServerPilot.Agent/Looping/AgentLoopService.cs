@@ -2,6 +2,7 @@ using ServerPilot.Agent.Api;
 using ServerPilot.Agent.Configuration;
 using ServerPilot.Agent.Credentials;
 using ServerPilot.Agent.Execution;
+using ServerPilot.Agent.Processes;
 
 namespace ServerPilot.Agent.Looping;
 
@@ -11,9 +12,12 @@ public sealed class AgentLoopService(
     AgentRetryExecutor retry,
     PeriodicAgentLoop periodicLoop,
     IAgentCommandExecutor commandExecutor,
-    ILogger<AgentLoopService> logger)
+    IAgentProcessStateReconciler processStateReconciler,
+    ILogger<AgentLoopService> logger) : IDisposable
 {
     private AgentCommandExecution? activeCommand;
+    private readonly SemaphoreSlim processStateGate = new(1, 1);
+    private int reconciliationReady;
 
     private static readonly Action<ILogger, Guid, int, Exception?> LogTransientFailure =
         LoggerMessage.Define<Guid, int>(
@@ -46,11 +50,15 @@ public sealed class AgentLoopService(
             options.HeartbeatInterval,
             token => ExecuteHeartbeatAsync(credential, fatalFailure, token),
             loopCancellation.Token);
+        Task reconciliationLoop = periodicLoop.RunAsync(
+            options.ProcessReconciliationInterval,
+            token => ExecuteReconciliationAsync(credential, fatalFailure, token),
+            loopCancellation.Token);
         Task pollingLoop = periodicLoop.RunAsync(
             options.CommandPollingInterval,
             token => ExecutePollingAsync(credential, fatalFailure, token),
             loopCancellation.Token);
-        Task allLoops = Task.WhenAll(heartbeatLoop, pollingLoop);
+        Task allLoops = Task.WhenAll(heartbeatLoop, pollingLoop, reconciliationLoop);
 
         Task completed = await Task.WhenAny(allLoops, fatalFailure.Task);
         if (completed == fatalFailure.Task)
@@ -108,37 +116,50 @@ public sealed class AgentLoopService(
     {
         try
         {
-            AgentCommandExecution? execution = Volatile.Read(ref activeCommand);
-            if (execution is null)
+            if (Volatile.Read(ref reconciliationReady) == 0)
             {
-                ClaimedAgentCommand? command = await retry.ExecuteAsync(
-                    token => apiClient.ClaimNextCommandAsync(credential, token),
-                    cancellationToken);
-                if (command is null)
-                {
-                    return true;
-                }
-
-                AgentCommandExecution newExecution = new(command);
-                execution = Interlocked.CompareExchange(
-                    ref activeCommand,
-                    newExecution,
-                    null) ?? newExecution;
-                if (ReferenceEquals(execution, newExecution))
-                {
-                    LogCommandReserved(
-                        logger,
-                        credential.AgentId,
-                        command.Id,
-                        command.CorrelationId,
-                        command.DeliveryKind,
-                        null);
-                }
+                return true;
             }
 
-            await commandExecutor.ExecuteAsync(credential, execution, cancellationToken);
-            Interlocked.CompareExchange(ref activeCommand, null, execution);
-            return true;
+            await processStateGate.WaitAsync(cancellationToken);
+            try
+            {
+                AgentCommandExecution? execution = Volatile.Read(ref activeCommand);
+                if (execution is null)
+                {
+                    ClaimedAgentCommand? command = await retry.ExecuteAsync(
+                        token => apiClient.ClaimNextCommandAsync(credential, token),
+                        cancellationToken);
+                    if (command is null)
+                    {
+                        return true;
+                    }
+
+                    AgentCommandExecution newExecution = new(command);
+                    execution = Interlocked.CompareExchange(
+                        ref activeCommand,
+                        newExecution,
+                        null) ?? newExecution;
+                    if (ReferenceEquals(execution, newExecution))
+                    {
+                        LogCommandReserved(
+                            logger,
+                            credential.AgentId,
+                            command.Id,
+                            command.CorrelationId,
+                            command.DeliveryKind,
+                            null);
+                    }
+                }
+
+                await commandExecutor.ExecuteAsync(credential, execution, cancellationToken);
+                Interlocked.CompareExchange(ref activeCommand, null, execution);
+                return true;
+            }
+            finally
+            {
+                processStateGate.Release();
+            }
         }
         catch (AgentRetryExhaustedException exception)
         {
@@ -159,6 +180,44 @@ public sealed class AgentLoopService(
         }
     }
 
+    private async Task<bool> ExecuteReconciliationAsync(
+        AgentCredential credential,
+        TaskCompletionSource<AgentApiException> fatalFailure,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await processStateGate.WaitAsync(cancellationToken);
+            try
+            {
+                await processStateReconciler.ReconcileAsync(credential, cancellationToken);
+                Volatile.Write(ref reconciliationReady, 1);
+                return true;
+            }
+            finally
+            {
+                processStateGate.Release();
+            }
+        }
+        catch (AgentRetryExhaustedException exception)
+        {
+            LogTransientFailure(logger, credential.AgentId, exception.Attempts, exception);
+            return true;
+        }
+        catch (AgentApiException exception) when (
+            exception.FailureKind != AgentApiFailureKind.Transient)
+        {
+            LogFatalFailure(
+                logger,
+                credential.AgentId,
+                "process reconciliation",
+                exception.FailureKind.ToString(),
+                exception);
+            fatalFailure.TrySetResult(exception);
+            return false;
+        }
+    }
+
     private static async Task IgnoreExpectedCancellationAsync(Task allLoops)
     {
         try
@@ -170,4 +229,6 @@ public sealed class AgentLoopService(
             // Expected when a fatal failure ends the paired loop.
         }
     }
+
+    public void Dispose() => processStateGate.Dispose();
 }

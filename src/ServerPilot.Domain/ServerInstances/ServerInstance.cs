@@ -50,6 +50,10 @@ public sealed class ServerInstance
 
     public int? LastProcessId { get; private set; }
 
+    public DateTimeOffset? LastProcessStartedAt { get; private set; }
+
+    public DateTimeOffset? LastStatusReportedAt { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -83,38 +87,88 @@ public sealed class ServerInstance
         UpdatedAt = utcUpdatedAt;
     }
 
-    public void RecordProcessState(
+    public ServerInstanceStateReportResult RecordProcessState(
         ServerInstanceStatus status,
         int? lastProcessId,
-        DateTimeOffset updatedAt)
+        DateTimeOffset? lastProcessStartedAt,
+        DateTimeOffset reportedAt)
     {
-        if (!Enum.IsDefined(status))
+        if (!IsReportableStatus(status))
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(status),
-                status,
-                "Unsupported server instance status.");
+            return ServerInstanceStateReportResult.InvalidState;
         }
 
-        if (lastProcessId is <= 0)
+        bool hasValidRunningIdentity =
+            lastProcessId is > 0 && lastProcessStartedAt.HasValue;
+        bool hasNoProcessIdentity =
+            lastProcessId is null && lastProcessStartedAt is null;
+        if ((status == ServerInstanceStatus.Running && !hasValidRunningIdentity) ||
+            (status != ServerInstanceStatus.Running && !hasNoProcessIdentity))
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(lastProcessId),
-                "Process ID must be positive when specified.");
+            return ServerInstanceStateReportResult.InvalidProcessIdentity;
         }
 
-        DateTimeOffset utcUpdatedAt = updatedAt.ToUniversalTime();
-        if (utcUpdatedAt < UpdatedAt)
+        DateTimeOffset utcReportedAt = reportedAt.ToUniversalTime();
+        DateTimeOffset? utcProcessStartedAt = lastProcessStartedAt?.ToUniversalTime();
+        if (utcReportedAt < CreatedAt ||
+            (LastStatusReportedAt.HasValue && utcReportedAt < LastStatusReportedAt.Value))
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(updatedAt),
-                "Server state cannot precede its current state.");
+            return ServerInstanceStateReportResult.StaleReport;
+        }
+
+        if (LastStatusReportedAt == utcReportedAt)
+        {
+            return Status == status &&
+                LastProcessId == lastProcessId &&
+                LastProcessStartedAt == utcProcessStartedAt
+                ? ServerInstanceStateReportResult.AlreadyApplied
+                : ServerInstanceStateReportResult.StaleReport;
+        }
+
+        if (!CanTransition(Status, status))
+        {
+            return ServerInstanceStateReportResult.InvalidState;
         }
 
         Status = status;
         LastProcessId = lastProcessId;
-        UpdatedAt = utcUpdatedAt;
+        LastProcessStartedAt = utcProcessStartedAt;
+        LastStatusReportedAt = utcReportedAt;
+        if (utcReportedAt > UpdatedAt)
+        {
+            UpdatedAt = utcReportedAt;
+        }
+
+        return ServerInstanceStateReportResult.Succeeded;
     }
+
+    private static bool IsReportableStatus(ServerInstanceStatus status) => status is
+        ServerInstanceStatus.Running or
+        ServerInstanceStatus.Stopped or
+        ServerInstanceStatus.Crashed;
+
+    private static bool CanTransition(
+        ServerInstanceStatus current,
+        ServerInstanceStatus next) => current switch
+        {
+            ServerInstanceStatus.Unknown => next is
+                ServerInstanceStatus.Running or ServerInstanceStatus.Stopped,
+            ServerInstanceStatus.Starting => next is
+                ServerInstanceStatus.Running or ServerInstanceStatus.Crashed,
+            ServerInstanceStatus.Running => next is
+                ServerInstanceStatus.Running or
+                ServerInstanceStatus.Stopped or
+                ServerInstanceStatus.Crashed,
+            ServerInstanceStatus.Stopping => next is
+                ServerInstanceStatus.Stopped or ServerInstanceStatus.Crashed,
+            ServerInstanceStatus.Stopped => next is
+                ServerInstanceStatus.Stopped or ServerInstanceStatus.Running,
+            ServerInstanceStatus.Crashed => next is
+                ServerInstanceStatus.Crashed or
+                ServerInstanceStatus.Stopped or
+                ServerInstanceStatus.Running,
+            _ => false,
+        };
 
     private void ApplyConfiguration(ServerInstanceConfiguration configuration)
     {

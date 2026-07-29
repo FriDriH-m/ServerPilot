@@ -14,6 +14,7 @@ public sealed class AgentOptionsTests
         Assert.Equal(new Uri("http://localhost:5050/"), options.GetApiBaseUri());
         Assert.Equal(TimeSpan.FromSeconds(10), options.HeartbeatInterval);
         Assert.Equal(TimeSpan.FromSeconds(5), options.CommandPollingInterval);
+        Assert.Equal(TimeSpan.FromSeconds(10), options.ProcessReconciliationInterval);
     }
 
     [Theory]

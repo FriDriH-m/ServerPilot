@@ -69,6 +69,18 @@ public sealed class AgentCommandExecutor(
         }
 
         AgentCommandOutcome recordedOutcome = execution.Outcome!;
+        if (recordedOutcome.ProcessState is not null && !execution.ProcessStateReported)
+        {
+            await retry.ExecuteAsync(
+                token => apiClient.ReportServerInstanceStateAsync(
+                    credential,
+                    command.ServerInstanceId,
+                    recordedOutcome.ProcessState,
+                    token),
+                cancellationToken);
+            execution.MarkProcessStateReported();
+        }
+
         if (recordedOutcome.Succeeded)
         {
             await retry.ExecuteAsync(
@@ -155,8 +167,13 @@ public sealed class AgentCommandExecutor(
         }
 
         ProcessSupervisorResult inspection = await supervisor.InspectAsync(cancellationToken);
-        return inspection.Status == ProcessSupervisorStatus.Running
-            ? AgentCommandOutcome.Completed()
+        return inspection is
+        {
+            Status: ProcessSupervisorStatus.Running,
+            Identity: not null,
+        }
+            ? AgentCommandOutcome.Completed(
+                AgentProcessStateReport.Running(inspection.Identity))
             : ProcessFailure(inspection);
     }
 
@@ -174,7 +191,7 @@ public sealed class AgentCommandExecutor(
 
         ProcessSupervisorResult inspection = await supervisor.InspectAsync(cancellationToken);
         return inspection.Status == ProcessSupervisorStatus.NotRunning
-            ? AgentCommandOutcome.Completed()
+            ? AgentCommandOutcome.Completed(AgentProcessStateReport.Stopped())
             : ProcessFailure(inspection);
     }
 

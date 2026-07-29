@@ -43,9 +43,60 @@ public sealed class ProcessSupervisorRegistryTests
         Assert.Equal(ProcessSupervisorResolutionFailure.InvalidConfiguration, result.Failure);
     }
 
+    [Fact]
+    public async Task SeedsPersistedIdentityForSafeRestartRediscovery()
+    {
+        ProcessIdentity identity = new(
+            42,
+            new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero),
+            @"C:\Servers\server.exe",
+            "server");
+        using LocalProcessSupervisorRegistry registry = new(
+            new IdentityProcessPlatform(new ProcessSnapshot(
+                identity.ProcessId,
+                identity.StartedAtUtc,
+                identity.ExecutablePath,
+                identity.ProcessName)),
+            NullLoggerFactory.Instance);
+
+        ProcessSupervisorResolution resolution = registry.Resolve(
+            Guid.NewGuid(),
+            CreateRequest() with { TrackedIdentity = identity });
+        ProcessSupervisorResult inspection = await resolution.Supervisor!.InspectAsync(
+            CancellationToken.None);
+
+        Assert.Equal(ProcessSupervisorStatus.Running, inspection.Status);
+        Assert.Equal(identity, inspection.Identity);
+    }
+
     private static ProcessSupervisorRequest CreateRequest() => new(
         @"C:\Servers\server.exe",
         "--port 16261",
         @"C:\Servers",
         "server");
+
+    private sealed class IdentityProcessPlatform(ProcessSnapshot snapshot) : IProcessPlatform
+    {
+        public bool FileExists(string path) => true;
+
+        public bool DirectoryExists(string path) => true;
+
+        public ProcessLaunchResult Launch(LocalProcessConfiguration configuration) =>
+            new(ProcessPlatformStatus.Failed);
+
+        public ProcessLookupResult Lookup(int processId) =>
+            new(ProcessPlatformStatus.Succeeded, snapshot);
+
+        public ProcessSignalResult RequestGracefulStop(ProcessIdentity identity) =>
+            new(ProcessPlatformStatus.NotSupported);
+
+        public ProcessSignalResult ForceStop(ProcessIdentity identity) =>
+            new(ProcessPlatformStatus.Failed);
+
+        public Task<ProcessWaitResult> WaitForExitAsync(
+            ProcessIdentity identity,
+            TimeSpan timeout,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new ProcessWaitResult(ProcessPlatformStatus.Failed));
+    }
 }

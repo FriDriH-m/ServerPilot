@@ -272,7 +272,11 @@ public sealed class ServerInstancesController(
             serverInstance.AgentId,
             serverInstance.Name,
             serverInstance.Status.ToString(),
+            serverInstance.ReportedStatus.ToString(),
             serverInstance.LastProcessId,
+            serverInstance.LastProcessStartedAt,
+            serverInstance.LastStatusReportedAt,
+            serverInstance.IsStateStale,
             serverInstance.CreatedAt,
             serverInstance.UpdatedAt);
 
@@ -286,7 +290,11 @@ public sealed class ServerInstancesController(
             serverInstance.WorkingDirectory,
             serverInstance.ProcessName,
             serverInstance.Status.ToString(),
+            serverInstance.ReportedStatus.ToString(),
             serverInstance.LastProcessId,
+            serverInstance.LastProcessStartedAt,
+            serverInstance.LastStatusReportedAt,
+            serverInstance.IsStateStale,
             serverInstance.CreatedAt,
             serverInstance.UpdatedAt);
 }

@@ -27,11 +27,18 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
             {
                 tableBuilder.HasCheckConstraint(
                     ValidStateConstraintName,
-                    "status BETWEEN 1 AND 7 AND " +
-                    "(last_process_id IS NULL OR last_process_id > 0)");
+                    "(status = 1 AND last_status_reported_at IS NULL AND " +
+                    "last_process_id IS NULL AND last_process_started_at IS NULL) OR " +
+                    "(status = 3 AND last_status_reported_at IS NOT NULL AND " +
+                    "last_process_id > 0 AND last_process_started_at IS NOT NULL) OR " +
+                    "(status IN (5, 6) AND last_status_reported_at IS NOT NULL AND " +
+                    "last_process_id IS NULL AND last_process_started_at IS NULL)");
                 tableBuilder.HasCheckConstraint(
                     ValidTimestampsConstraintName,
-                    "updated_at >= created_at");
+                    "updated_at >= created_at AND " +
+                    "(last_status_reported_at IS NULL OR " +
+                    "(last_status_reported_at >= created_at AND " +
+                    "last_status_reported_at <= updated_at))");
                 tableBuilder.HasCheckConstraint(
                     TrimmedConfigurationConstraintName,
                     "name = btrim(name) AND name <> '' AND " +
@@ -80,6 +87,12 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
             .IsRequired();
         builder.Property(serverInstance => serverInstance.LastProcessId)
             .HasColumnName("last_process_id");
+        builder.Property(serverInstance => serverInstance.LastProcessStartedAt)
+            .HasColumnName("last_process_started_at")
+            .HasColumnType("timestamp with time zone");
+        builder.Property(serverInstance => serverInstance.LastStatusReportedAt)
+            .HasColumnName("last_status_reported_at")
+            .HasColumnType("timestamp with time zone");
         builder.Property(serverInstance => serverInstance.CreatedAt)
             .HasColumnName("created_at")
             .HasColumnType("timestamp with time zone")

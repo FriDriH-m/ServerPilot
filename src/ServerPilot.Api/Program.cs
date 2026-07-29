@@ -48,6 +48,7 @@ builder.Services.AddScoped<AgentHeartbeatService>();
 builder.Services.AddScoped<AgentQueryService>();
 builder.Services.AddScoped<AgentManagementService>();
 builder.Services.AddScoped<ServerInstanceService>();
+builder.Services.AddScoped<AgentServerInstanceService>();
 builder.Services.AddScoped<ServerCommandService>();
 builder.Services.AddScoped<AgentCommandService>();
 builder.Services.AddScoped<UserAuthenticationService>();

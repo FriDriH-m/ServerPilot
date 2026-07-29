@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using ServerPilot.Agent.Api;
 using ServerPilot.Agent.Credentials;
+using ServerPilot.Agent.Processes;
 
 namespace ServerPilot.UnitTests.AgentLooping;
 
@@ -130,6 +131,73 @@ public sealed class HttpAgentApiClientTests
     }
 
     [Fact]
+    public async Task ReadsAssignedServerInstancesWithPersistedProcessIdentity()
+    {
+        AgentCredential credential = CreateCredential();
+        Guid serverInstanceId = Guid.NewGuid();
+        DateTimeOffset startedAt = new(2026, 7, 29, 12, 0, 0, TimeSpan.Zero);
+        StubHttpMessageHandler handler = new(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new[]
+                {
+                    new
+                    {
+                        Id = serverInstanceId,
+                        ExecutablePath = @"C:\Servers\server.exe",
+                        Arguments = string.Empty,
+                        WorkingDirectory = @"C:\Servers",
+                        ProcessName = "server",
+                        ReportedStatus = "Running",
+                        LastProcessId = 42,
+                        LastProcessStartedAt = startedAt,
+                        LastStatusReportedAt = startedAt.AddSeconds(1),
+                    },
+                }),
+            });
+        HttpAgentApiClient client = CreateClient(handler);
+
+        AssignedAgentServerInstance instance = Assert.Single(
+            await client.ListServerInstancesAsync(credential, CancellationToken.None));
+
+        Assert.Equal(serverInstanceId, instance.Id);
+        Assert.Equal(AgentServerInstanceStatus.Running, instance.ReportedStatus);
+        Assert.Equal(new ProcessIdentity(
+            42,
+            startedAt,
+            @"C:\Servers\server.exe",
+            "server"), instance.Identity);
+    }
+
+    [Fact]
+    public async Task ReportsVerifiedServerInstanceStateWithAgentCredential()
+    {
+        RecordingServerStateHandler handler = new();
+        HttpAgentApiClient client = CreateClient(handler);
+        AgentCredential credential = CreateCredential();
+        Guid serverInstanceId = Guid.NewGuid();
+        ProcessIdentity identity = new(
+            42,
+            new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero),
+            @"C:\Servers\server.exe",
+            "server");
+
+        await client.ReportServerInstanceStateAsync(
+            credential,
+            serverInstanceId,
+            AgentProcessStateReport.Running(identity),
+            CancellationToken.None);
+
+        Assert.Equal(
+            $"/api/agents/{credential.AgentId}/server-instances/{serverInstanceId}/status",
+            handler.RequestUri?.AbsolutePath);
+        Assert.Equal("Agent", handler.Authorization?.Scheme);
+        using JsonDocument body = JsonDocument.Parse(handler.Body!);
+        Assert.Equal("Running", body.RootElement.GetProperty("status").GetString());
+        Assert.Equal(42, body.RootElement.GetProperty("processId").GetInt32());
+    }
+
+    [Fact]
     public async Task ClassifiesUnauthorizedResponseAsAuthenticationFailure()
     {
         HttpAgentApiClient client = CreateClient(
@@ -208,6 +276,25 @@ public sealed class HttpAgentApiClientTests
             Body = request.Content is null
                 ? null
                 : await request.Content.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        }
+    }
+
+    private sealed class RecordingServerStateHandler : HttpMessageHandler
+    {
+        public Uri? RequestUri { get; private set; }
+
+        public AuthenticationHeaderValue? Authorization { get; private set; }
+
+        public string? Body { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            RequestUri = request.RequestUri;
+            Authorization = request.Headers.Authorization;
+            Body = await request.Content!.ReadAsStringAsync(cancellationToken);
             return new HttpResponseMessage(HttpStatusCode.NoContent);
         }
     }

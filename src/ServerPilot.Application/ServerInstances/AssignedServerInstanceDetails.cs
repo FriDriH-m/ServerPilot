@@ -2,20 +2,13 @@ using ServerPilot.Domain.ServerInstances;
 
 namespace ServerPilot.Application.ServerInstances;
 
-public sealed record ServerInstanceDetails(
+public sealed record AssignedServerInstanceDetails(
     Guid Id,
-    Guid AgentId,
-    string Name,
     string ExecutablePath,
     string Arguments,
     string WorkingDirectory,
     string ProcessName,
-    ServerInstanceStatus Status,
     ServerInstanceStatus ReportedStatus,
     int? LastProcessId,
     DateTimeOffset? LastProcessStartedAt,
-    DateTimeOffset? LastStatusReportedAt,
-    bool IsStateStale,
-    DateTimeOffset? AgentLastSeenAt,
-    DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset? LastStatusReportedAt);
