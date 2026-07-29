@@ -79,8 +79,13 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
         Assert.Equal(AgentCommandDeliveryKind.New.ToString(), claimed.DeliveryKind);
         Assert.Equal(1, claimed.AttemptCount);
         Assert.Equal(timeProvider.GetUtcNow(), claimed.ClaimedAt);
-        Assert.DoesNotContain("executablePath", payload, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("workingDirectory", payload, StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(claimed.ServerInstance);
+        Assert.Equal(
+            $@"C:\Servers\{firstServer.Name}.exe",
+            claimed.ServerInstance.ExecutablePath);
+        Assert.Equal("--port 16261", claimed.ServerInstance.Arguments);
+        Assert.Equal(@"C:\Servers", claimed.ServerInstance.WorkingDirectory);
+        Assert.Equal(firstServer.Name, claimed.ServerInstance.ProcessName);
 
         await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
         ServerPilotDbContext dbContext =
@@ -594,7 +599,7 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
 
     private sealed record RegisteredAgent(Guid AgentId, string Credential);
 
-    private sealed record ServerInstanceResponse(Guid Id, Guid AgentId);
+    private sealed record ServerInstanceResponse(Guid Id, Guid AgentId, string Name);
 
     private sealed record ServerCommandResponse(
         Guid Id,
@@ -609,7 +614,14 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
         string? ErrorCode,
         int AttemptCount,
         Guid CorrelationId,
-        string? DeliveryKind = null);
+        string? DeliveryKind = null,
+        ServerInstanceExecutionResponse? ServerInstance = null);
+
+    private sealed record ServerInstanceExecutionResponse(
+        string ExecutablePath,
+        string Arguments,
+        string WorkingDirectory,
+        string ProcessName);
 
     private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {

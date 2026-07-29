@@ -2,4 +2,5 @@ namespace ServerPilot.Application.Commands;
 
 public sealed record ClaimedServerCommandDetails(
     ServerCommandDetails Command,
-    AgentCommandDeliveryKind DeliveryKind);
+    AgentCommandDeliveryKind DeliveryKind,
+    ServerInstanceExecutionDetails ServerInstance);

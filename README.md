@@ -217,6 +217,7 @@ API
 - [`docs/adr/0006-postgresql-command-claiming.md`](docs/adr/0006-postgresql-command-claiming.md) — решение по атомарной выдаче команд Agent через PostgreSQL.
 - [`docs/adr/0007-agent-heartbeat-and-command-polling.md`](docs/adr/0007-agent-heartbeat-and-command-polling.md) — решение по Agent heartbeat, polling и ограниченным retry.
 - [`docs/adr/0008-safe-local-process-supervision.md`](docs/adr/0008-safe-local-process-supervision.md) — решение по безопасной границе запуска и остановки локального процесса.
+- [`docs/adr/0009-idempotent-agent-command-execution.md`](docs/adr/0009-idempotent-agent-command-execution.md) — решение по staged-выполнению команд и retry без повторения process action.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -373,9 +374,17 @@ Agent ID сохраняется атомарно в
 считаются неисправимой credential/configuration ошибкой: Agent пишет структурированное
 событие без секрета и останавливается, не создавая бесконечный retry loop.
 
-После `claim-next` Agent удерживает одну команду в памяти и не забирает следующую до
-появления executor в #29. Он пока не запускает локальный процесс и не отправляет
-transition: подключение уже реализованного supervisor остаётся задачей #29.
+После `claim-next` Agent получает вместе с командой сохранённую process-конфигурацию
+целевого `ServerInstance`, переводит команду в `Running`, выполняет `StartServer` или
+`StopServer` через supervisor и проверяет фактическое состояние перед `Completed`.
+Ошибка конфигурации или процесса отправляется как `Failed` с безопасным стабильным кодом
+и общим сообщением без локальных путей, аргументов или stack trace.
+
+В памяти одновременно находится только один staged work item. Если response на
+`/complete` или `/fail` потерян, Agent повторяет только terminal report с тем же
+Correlation ID, но не process action. Следующая команда не запрашивается, пока текущий
+result не принят API. Rediscovery после рестарта Agent и persisted actual state остаются
+задачей #30.
 
 ### Безопасный process supervisor Agent
 
@@ -510,7 +519,7 @@ dotnet ef database update --project src/ServerPilot.Infrastructure --startup-pro
 одноразовые Agent installation tokens, регистрация, отдельная аутентификация, heartbeat,
 пользовательские Agent queries, ServerInstance configuration/ownership, пользовательские
 Start/Stop endpoints, история ServerCommand и Agent endpoints атомарной выдачи, прогресса
-и результата команд. Реализованы функциональные задачи #25, #26, #27 и #28. Agent теперь
+и результата команд. Реализованы функциональные задачи #25–#29. Agent теперь
 валидирует typed configuration до запуска фоновых циклов, регистрируется по installation
 token только при первом запуске и хранит выданный credential в Windows DPAPI-защищённом
 local storage текущего пользователя, отправляет heartbeat и последовательно получает
@@ -524,7 +533,11 @@ PostgreSQL-инвариант одной `Claimed`/`Running` команды на
 не использует shell, предотвращает повторный запуск, сверяет полную identity процесса
 перед остановкой и применяет ограниченный forced fallback только после graceful attempt.
 
-Следующая задача — #29: идемпотентное выполнение StartServer/StopServer, связывающее
-работающий polling loop с безопасным process supervisor.
+Polling loop связан с supervisor через staged command executor: API выдаёт сохранённую
+конфигурацию только целевому Agent, `StartServer`/`StopServer` выполняются один раз и
+проверяются inspection, а потерянный terminal response не повторяет локальное действие.
+
+Следующая задача — #30: периодическая сверка фактического состояния, persisted PID/status,
+rediscovery после рестарта Agent и обнаружение неожиданного завершения процесса.
 
 Текущая цель — реализовать минимальный рабочий вертикальный сценарий без преждевременного добавления сложной инфраструктуры.
