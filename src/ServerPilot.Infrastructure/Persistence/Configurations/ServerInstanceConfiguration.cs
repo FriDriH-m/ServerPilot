@@ -11,6 +11,7 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
 {
     internal const string AgentCreatedAtIdIndexName =
         "ix_server_instances_agent_id_created_at_id";
+    internal const string AgentIdIdAlternateKeyName = "ak_server_instances_agent_id_id";
     internal const string ValidStateConstraintName =
         "ck_server_instances_valid_state";
     internal const string ValidTimestampsConstraintName =
@@ -42,6 +43,12 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
             });
         builder.HasKey(serverInstance => serverInstance.Id)
             .HasName("pk_server_instances");
+        builder.HasAlternateKey(serverInstance => new
+        {
+            serverInstance.AgentId,
+            serverInstance.Id,
+        })
+            .HasName(AgentIdIdAlternateKeyName);
 
         builder.Property(serverInstance => serverInstance.Id).HasColumnName("id");
         builder.Property(serverInstance => serverInstance.AgentId)

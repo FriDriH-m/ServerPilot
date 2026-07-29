@@ -5,7 +5,11 @@ public sealed class ServerCommand
     public const int MaximumErrorCodeLength = 64;
     public const int MaximumErrorMessageLength = 2_048;
 
-    public ServerCommand(
+    private ServerCommand()
+    {
+    }
+
+    private ServerCommand(
         Guid id,
         Guid agentId,
         Guid serverInstanceId,
@@ -27,19 +31,28 @@ public sealed class ServerCommand
         Status = ServerCommandStatus.Pending;
     }
 
-    public Guid Id { get; }
-    public Guid AgentId { get; }
-    public Guid ServerInstanceId { get; }
-    public ServerCommandType Type { get; }
+    public Guid Id { get; private set; }
+    public Guid AgentId { get; private set; }
+    public Guid ServerInstanceId { get; private set; }
+    public ServerCommandType Type { get; private set; }
     public ServerCommandStatus Status { get; private set; }
-    public DateTimeOffset CreatedAt { get; }
+    public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset? ClaimedAt { get; private set; }
     public DateTimeOffset? StartedAt { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
     public string? ErrorCode { get; private set; }
     public string? ErrorMessage { get; private set; }
     public int AttemptCount { get; private set; }
-    public Guid CorrelationId { get; }
+    public Guid CorrelationId { get; private set; }
+
+    public static ServerCommand Create(
+        Guid id,
+        Guid agentId,
+        Guid serverInstanceId,
+        ServerCommandType type,
+        DateTimeOffset createdAt,
+        Guid correlationId) =>
+        new(id, agentId, serverInstanceId, type, createdAt, correlationId);
 
     public bool TryClaim(DateTimeOffset claimedAt)
     {
@@ -85,26 +98,53 @@ public sealed class ServerCommand
             return false;
         }
 
-        ArgumentException.ThrowIfNullOrWhiteSpace(errorCode);
-        ArgumentException.ThrowIfNullOrWhiteSpace(errorMessage);
-        if (errorCode.Length > MaximumErrorCodeLength)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(errorCode),
-                $"Error code must not exceed {MaximumErrorCodeLength} characters.");
-        }
-
-        if (errorMessage.Length > MaximumErrorMessageLength)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(errorMessage),
-                $"Error message must not exceed {MaximumErrorMessageLength} characters.");
-        }
-
+        string normalizedErrorCode = NormalizeFailureDetail(
+            errorCode,
+            MaximumErrorCodeLength,
+            nameof(errorCode));
+        string normalizedErrorMessage = NormalizeFailureDetail(
+            errorMessage,
+            MaximumErrorMessageLength,
+            nameof(errorMessage));
         CompletedAt = NormalizeTransitionTime(completedAt, StartedAt!.Value, nameof(completedAt));
-        ErrorCode = errorCode;
-        ErrorMessage = errorMessage;
+        ErrorCode = normalizedErrorCode;
+        ErrorMessage = normalizedErrorMessage;
         Status = ServerCommandStatus.Failed;
+        return true;
+    }
+
+    public bool TryCancel(DateTimeOffset cancelledAt)
+    {
+        if (Status != ServerCommandStatus.Pending)
+        {
+            return false;
+        }
+
+        CompletedAt = NormalizeTransitionTime(cancelledAt, CreatedAt, nameof(cancelledAt));
+        Status = ServerCommandStatus.Cancelled;
+        return true;
+    }
+
+    public bool TryTimeout(DateTimeOffset timedOutAt)
+    {
+        DateTimeOffset? earliestAllowed = Status switch
+        {
+            ServerCommandStatus.Pending => CreatedAt,
+            ServerCommandStatus.Claimed => ClaimedAt,
+            ServerCommandStatus.Running => StartedAt,
+            _ => null,
+        };
+
+        if (!earliestAllowed.HasValue)
+        {
+            return false;
+        }
+
+        CompletedAt = NormalizeTransitionTime(
+            timedOutAt,
+            earliestAllowed.Value,
+            nameof(timedOutAt));
+        Status = ServerCommandStatus.TimedOut;
         return true;
     }
 
@@ -129,5 +169,22 @@ public sealed class ServerCommand
         }
 
         return utcValue;
+    }
+
+    private static string NormalizeFailureDetail(
+        string value,
+        int maximumLength,
+        string parameterName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, parameterName);
+        string normalizedValue = value.Trim();
+        if (normalizedValue.Length > maximumLength)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                $"{parameterName} must not exceed {maximumLength} characters.");
+        }
+
+        return normalizedValue;
     }
 }
