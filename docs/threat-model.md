@@ -2,8 +2,9 @@
 
 This lightweight model is updated when an active issue introduces a real trust
 boundary. It currently covers user authentication, one-time Agent installation tokens,
-Agent registration and revocable Agent credentials. The local-process boundary will be
-expanded when process execution is implemented.
+Agent registration, revocable Agent credentials and persisted ServerInstance process
+configuration. The local-process execution boundary will be expanded when command
+execution is implemented.
 
 ## Data flow and trust boundaries
 
@@ -34,7 +35,11 @@ PostgreSQL: monotonic last_seen_at
 User/client -> ASP.NET Core API -> PostgreSQL: owner-scoped Agent metadata query
   | response: safe metadata + derived Online/Offline state
 
-Future flow: API -> authenticated Agent -> allow-listed local process operations
+User/client -> ASP.NET Core API -> PostgreSQL: owner-scoped ServerInstance configuration
+  | list response: safe metadata only; full paths/arguments only for the owner
+  | stored configuration: target Agent + absolute path shape + bare process name
+
+Future flow: API -> authenticated Agent -> stored allow-listed ServerInstance process operations
 ```
 
 The client/API and API/PostgreSQL transitions are trust boundaries. The JWT signing
@@ -52,7 +57,7 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Duplicate accounts under concurrency | Unique PostgreSQL index on normalized email; specific constraint handling | Normalization is intentionally limited to trim + invariant case folding |
 | Forged or modified access token | HMAC-SHA256 signature plus issuer, audience, lifetime, algorithm and subject validation | Symmetric key rotation is not implemented in the MVP |
 | Stolen access token | Short 30-minute lifetime; tokens are not persisted or logged | No immediate revocation or refresh-token flow |
-| Client-supplied ownership identifier | Authenticated user ID comes from the validated `sub` claim | Resource ownership enforcement begins when owned resources are implemented |
+| Client-supplied ownership identifier | Authenticated user ID comes from the validated `sub` claim; Agent and ServerInstance queries scope through that owner | Future owned resources must preserve the same owner-scoped query pattern |
 | Known or committed deployment secret | Example secrets are empty, Compose requires explicit values, and startup rejects the former public JWT placeholder | Operators must generate, rotate and protect strong deployment-specific values |
 | Credential response cached | JWT, raw installation-token and raw Agent-credential responses use `Cache-Control: no-store` | Clients must still protect credentials after receipt |
 | Online credential guessing or token flooding | Fixed-window limits protect anonymous authentication and authenticated token endpoints; active token count and list size are bounded | Distributed deployments will need a shared or upstream limiter if per-process limits are insufficient |
@@ -67,6 +72,10 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Agent submits heartbeat for another Agent | The route ID must equal the exact Agent ID resolved by authentication; mismatches return 404 and do not write | A credential still acts as its own Agent until revoked |
 | Client clock forges or regresses liveness | Heartbeat has no client timestamp; server UTC conditionally advances `last_seen_at`, and PostgreSQL rejects values before registration | API host clock synchronization is an operational dependency |
 | Persisted availability becomes stale | `Online`/`Offline` is derived during reads from `last_seen_at` and a validated threshold; no boolean or scheduled status write exists | Status is a recent-contact signal, not proof that the local process is healthy |
+| Cross-user ServerInstance access | Create verifies ownership of the target Agent; list/get/update/delete scope through the Agent owner and foreign IDs return `404` | Future command endpoints must preserve the same ServerInstance ownership path |
+| Local paths or launch arguments disclosed broadly | List responses and structured logs exclude paths and arguments; full configuration is returned only to the owning user | The owner can retrieve their configuration, so clients must protect their own API credentials |
+| Path traversal or an API-side path check targets the wrong machine | API rejects `.`/`..` and device-path segments, validates bounded Windows/UNC path shape only, and does not inspect a remote host | A future Agent must validate the stored configuration before process execution |
+| Active process configuration removed during management | Owner and inactive-state predicates are combined in one conditional delete; active states return `409` | A future command/state transition must handle a deleted inactive instance by verifying existence atomically |
 | Security operation has no audit trail | User/Agent registration, login, token operations and credential revocation emit structured events with identifiers but no credential values | Full API/Agent correlation remains in issue #31 |
 
 ## Security invariants
@@ -81,4 +90,8 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 - A heartbeat may update only the Agent identity resolved from its credential.
 - Never trust a client-provided timestamp for Agent availability.
 - Scope every Agent read to the authenticated user before projecting metadata.
+- Scope every ServerInstance operation to the authenticated owner of its target Agent.
+- Never expose ServerInstance executable paths, working directories or arguments in a list response or structured log.
+- A user cannot delete a ServerInstance while its persisted process state is active.
+- The future Agent may execute only a stored ServerInstance configuration, never a command path or arguments supplied directly by a command request.
 - Use HTTPS outside local development.

@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ServerPilot.Application.Agents;
 using ServerPilot.Application.Authentication;
 using ServerPilot.Application.InstallationTokens;
+using ServerPilot.Application.ServerInstances;
 using ServerPilot.Infrastructure.Agents;
 using ServerPilot.Infrastructure.Authentication;
 using ServerPilot.Infrastructure.InstallationTokens;
@@ -26,6 +27,7 @@ public static class DependencyInjection
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IAgentRepository, AgentRepository>();
         services.AddScoped<IAgentInstallationTokenRepository, AgentInstallationTokenRepository>();
+        services.AddScoped<IServerInstanceRepository, ServerInstanceRepository>();
         services.AddSingleton<IAgentCredentialGenerator,
             CryptographicAgentCredentialGenerator>();
         services.AddSingleton<IAgentInstallationTokenGenerator,

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
+using ServerPilot.Domain.Agents;
 using ServerPilot.Domain.Users;
 using ServerPilot.Infrastructure.Persistence;
 using ServerPilot.IntegrationTests.Infrastructure;
@@ -41,7 +42,7 @@ public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
         Assert.Contains(
             appliedMigrations,
             migration => migration.EndsWith(
-                "_AddAgentHeartbeatAndQueries",
+                "_AddServerInstances",
                 StringComparison.Ordinal));
         Assert.Empty(await dbContext.Database.GetPendingMigrationsAsync(CancellationToken.None));
 
@@ -58,6 +59,19 @@ public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
         Assert.Contains("user_id", indexDefinition, StringComparison.Ordinal);
         Assert.Contains("registered_at DESC", indexDefinition, StringComparison.Ordinal);
         Assert.Contains("id DESC", indexDefinition, StringComparison.Ordinal);
+
+        await using var serverIndexCommand = dbContext.Database.GetDbConnection().CreateCommand();
+        serverIndexCommand.CommandText = """
+            SELECT indexdef
+            FROM pg_indexes
+            WHERE schemaname = 'public'
+              AND indexname = 'ix_server_instances_agent_id_created_at_id'
+            """;
+        string serverIndexDefinition = Assert.IsType<string>(
+            await serverIndexCommand.ExecuteScalarAsync(CancellationToken.None));
+        Assert.Contains("agent_id", serverIndexDefinition, StringComparison.Ordinal);
+        Assert.Contains("created_at DESC", serverIndexDefinition, StringComparison.Ordinal);
+        Assert.Contains("id DESC", serverIndexDefinition, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -157,5 +171,43 @@ public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
         Assert.Equal(
             "ck_agents_valid_last_seen_at",
             invalidLastSeen.ConstraintName);
+    }
+
+    [Fact]
+    public async Task DatabaseRejectsInvalidServerInstanceState()
+    {
+        await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
+        ServerPilotDbContext dbContext =
+            scope.ServiceProvider.GetRequiredService<ServerPilotDbContext>();
+        DateTimeOffset createdAt = DateTimeOffset.UtcNow;
+        User user = User.Create(
+            Guid.NewGuid(),
+            "server-constraints@example.com",
+            "SERVER-CONSTRAINTS@EXAMPLE.COM",
+            "test-password-hash",
+            createdAt);
+        Agent agent = Agent.Create(
+            Guid.NewGuid(),
+            user.Id,
+            "Agent",
+            "HOST",
+            "Windows",
+            "1.0.0",
+            new string('a', Agent.CredentialHashLength),
+            createdAt);
+        dbContext.AddRange(user, agent);
+        await dbContext.SaveChangesAsync(CancellationToken.None);
+
+        PostgresException invalidState = await Assert.ThrowsAsync<PostgresException>(() =>
+            dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO server_instances
+                    (id, agent_id, name, executable_path, arguments, working_directory,
+                     process_name, status, last_process_id, created_at, updated_at)
+                VALUES
+                    ({Guid.NewGuid()}, {agent.Id}, {"Server"}, {"C:\\Servers\\server.exe"},
+                     {""}, {"C:\\Servers"}, {"server.exe"}, 0, NULL,
+                     {createdAt}, {createdAt})
+                """, CancellationToken.None));
+        Assert.Equal("ck_server_instances_valid_state", invalidState.ConstraintName);
     }
 }

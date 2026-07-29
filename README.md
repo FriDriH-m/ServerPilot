@@ -212,6 +212,7 @@ API
 - [`docs/adr/0001-user-password-and-jwt-authentication.md`](docs/adr/0001-user-password-and-jwt-authentication.md) — решение по password hashing и JWT.
 - [`docs/adr/0002-one-time-agent-installation-tokens.md`](docs/adr/0002-one-time-agent-installation-tokens.md) — решение по одноразовым installation tokens.
 - [`docs/adr/0003-agent-registration-and-opaque-credentials.md`](docs/adr/0003-agent-registration-and-opaque-credentials.md) — решение по атомарной регистрации и отдельным Agent credentials.
+- [`docs/adr/0004-server-instance-process-configuration.md`](docs/adr/0004-server-instance-process-configuration.md) — решение по конфигурации локального процесса и её границе доверия.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -351,6 +352,20 @@ Login/register ограничены десятью запросами в мин�
 настраиваются в секции `RateLimiting`. Ответы, содержащие JWT, исходный installation
 token или Agent credential, помечены `Cache-Control: no-store`.
 
+### Конфигурация ServerInstance
+
+Пользователь с JWT может создавать, просматривать, изменять и удалять только
+`ServerInstance` своих Agent через `/api/server-instances`. Конфигурация хранится в
+PostgreSQL: имя, абсолютные Windows/UNC-пути без сегментов `.`/`..` к исполняемому файлу и рабочей директории,
+аргументы и имя процесса. Это заранее сохранённая конфигурация, а не произвольная
+команда, передаваемая будущему Agent при каждом запуске.
+
+`GET /api/server-instances` возвращает безопасный список без локальных путей и
+аргументов. Полная конфигурация доступна только владельцу через создание, получение по
+ID или изменение. API проверяет базовую форму пути, но не проверяет существование файла
+на удалённой машине — это обязанность Agent при выполнении будущей команды. Нельзя
+удалить экземпляр в состояниях `Starting`, `Running` или `Stopping`: API вернёт `409`.
+
 ## Continuous integration
 
 Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) запускается для каждого pull request в `main` и каждого push в `main`.
@@ -394,8 +409,8 @@ dotnet ef database update --project src/ServerPilot.Infrastructure --startup-pro
 ## Статус проекта
 
 Завершены foundation, PostgreSQL, API conventions, CI, пользовательская JWT-аутентификация,
-одноразовые Agent installation tokens, регистрация, отдельная аутентификация, heartbeat
-и пользовательские Agent queries. Следующая функциональная задача — #22,
-ServerInstance configuration и ownership.
+одноразовые Agent installation tokens, регистрация, отдельная аутентификация, heartbeat,
+пользовательские Agent queries и ServerInstance configuration/ownership. Следующая
+функциональная задача — #23, доменная модель ServerCommand и конечный автомат состояний.
 
 Текущая цель — реализовать минимальный рабочий вертикальный сценарий без преждевременного добавления сложной инфраструктуры.
