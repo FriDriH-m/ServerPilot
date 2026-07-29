@@ -26,7 +26,9 @@ also race unless they share an ordering boundary.
 - Before command polling becomes eligible after startup, reconciliation must successfully
   load assignments. A persisted `Running` identity seeds the supervisor; PID, start time,
   executable path and process name must all match before the process is rediscovered or
-  signalled.
+  signalled. Start-time comparison permits only a difference smaller than PostgreSQL's
+  one-microsecond timestamp precision; PID, path and process name remain exact identity
+  checks.
 - Command execution and periodic reconciliation share one Agent-side gate. Successful
   StartServer/StopServer records its verified `Running`/`Stopped` state before the terminal
   command result; transient report retry reuses the cached outcome.
@@ -45,6 +47,10 @@ also race unless they share an ordering boundary.
   same-name process could cause ServerPilot to adopt or stop the wrong process.
 - Scan all local processes after Agent restart: rejected for the MVP because configuration
   matching without the persisted start identity is ambiguous.
+- Require tick-exact start time after a PostgreSQL round trip: rejected because PostgreSQL
+  timestamps preserve microseconds while Windows/.NET can observe 100-nanosecond ticks;
+  exact comparison falsely rejects the same process. A wider clock-skew tolerance is also
+  rejected because start time is identity data, not a wall-clock ordering signal.
 - Run command execution and reconciliation without coordination: rejected because an
   inspection between a successful stop and its state report could incorrectly classify the
   intentional exit as a crash.
@@ -54,6 +60,8 @@ also race unless they share an ordering boundary.
 - API restart is harmless because the reported state and complete identity are persisted.
 - Agent restart safely recovers a process only when a previously persisted complete identity
   still matches; otherwise it reports `Crashed` and never signals the candidate.
+- The sub-microsecond comparison bound handles database precision loss without accepting a
+  process whose observed start time differs by one microsecond or more.
 - The process start timestamp comes from the Agent host while report receipt time comes from
   the API host. They are deliberately not ordered against each other, so clock skew cannot
   invalidate an otherwise safe identity.
@@ -66,10 +74,12 @@ also race unless they share an ordering boundary.
 
 - Domain tests cover identity requirements and explicit `Running -> Crashed` transitions.
 - Agent tests cover persisted-identity seeding, restart rediscovery, stale/missing process
-  crash detection, no fabricated stopped state, and state-report retry without a repeated
-  process action.
+  crash detection, PostgreSQL timestamp precision, no fabricated stopped state, and
+  state-report retry without a repeated process action.
 - HTTP client tests cover assignment parsing and authenticated state reports.
 - PostgreSQL integration tests cover Agent ownership, persisted PID/start time/status,
   invalid reports, online/offline user projections and `Unreachable` stale semantics.
 - `eng/verify.ps1` validates build, formatting, unit tests, PostgreSQL integration tests,
   migration drift, Compose configuration and the API image.
+- `eng/verify-e2e.ps1` restarts the real Windows Agent around a live harmless process and
+  verifies that the persisted identity is rediscovered with the same PID.
