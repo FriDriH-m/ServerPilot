@@ -28,6 +28,25 @@ Assert-NativeCommandSucceeded "dotnet build"
 dotnet format ServerPilot.slnx --verify-no-changes --no-restore
 Assert-NativeCommandSucceeded "dotnet format"
 
+$webClientDirectory = Join-Path $PSScriptRoot "../src/ServerPilot.Web"
+Push-Location $webClientDirectory
+try {
+    npm ci
+    Assert-NativeCommandSucceeded "npm ci"
+
+    npm audit --audit-level=high
+    Assert-NativeCommandSucceeded "npm audit"
+
+    npm test
+    Assert-NativeCommandSucceeded "npm test"
+
+    npm run build
+    Assert-NativeCommandSucceeded "npm run build"
+}
+finally {
+    Pop-Location
+}
+
 $unitTestArguments = @(
     "test",
     "tests/ServerPilot.UnitTests/ServerPilot.UnitTests.csproj",

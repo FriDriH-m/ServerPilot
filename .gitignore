@@ -6,6 +6,8 @@
 # Local environment and generated knowledge graph
 .env
 !.env.example
+.env.local
+.env.*.local
 graphify-out/
 
 # Visual Studio cache/options directory
@@ -28,6 +30,12 @@ artifacts/
 
 # Publish output
 publish/
+
+### Node.js / frontend
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
 
 ### Windows
 # Windows thumbnail cache files
