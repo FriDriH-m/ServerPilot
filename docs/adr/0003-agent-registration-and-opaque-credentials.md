@@ -83,10 +83,11 @@ take effect without waiting for an access-token lifetime.
 - Availability reads use one configurable threshold and one captured server timestamp,
   so every item in a list is evaluated consistently. Clock synchronization remains an
   operational requirement for the API host.
-- The credential is bound to the Windows user profile that registered the Agent. Moving
-  the Agent to a different user or machine requires a new installation token and
-  registration; Windows Service account support is deferred to issue #37. DPAPI does
-  not protect against malicious code running as that same Windows user.
+- The credential is bound to the Windows identity that registered the Agent. Moving the
+  Agent to a different user or machine requires a new installation token and registration.
+  ADR 0013 applies the same DPAPI `CurrentUser` rule to the dedicated Windows Service
+  identity and restricted ProgramData storage. DPAPI does not protect against malicious
+  code running as that same identity.
 
 ## Verification evidence
 

@@ -28,6 +28,10 @@ Assert-NativeCommandSucceeded "dotnet build"
 dotnet format ServerPilot.slnx --verify-no-changes --no-restore
 Assert-NativeCommandSucceeded "dotnet format"
 
+& "$PSScriptRoot/agent/Publish-AgentPackage.ps1" `
+    -OutputDirectory "$PSScriptRoot/../artifacts/agent/verify-win-x64" `
+    -SkipArchive
+
 $webClientDirectory = Join-Path $PSScriptRoot "../src/ServerPilot.Web"
 Push-Location $webClientDirectory
 try {

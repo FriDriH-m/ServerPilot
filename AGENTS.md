@@ -241,9 +241,8 @@ Do not assume that network delivery occurs exactly once.
 
 ## Agent rules
 
-The Agent initially runs as a console-hosted .NET Worker Service.
-
-Windows Service installation will be added later.
+The Agent supports both a console-hosted .NET Worker Service for development and the
+post-MVP self-contained Windows Service delivery defined by issue #37. Preserve both modes.
 
 The Agent must:
 
