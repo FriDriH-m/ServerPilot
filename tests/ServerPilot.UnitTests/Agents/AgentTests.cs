@@ -47,6 +47,28 @@ public sealed class AgentTests
             RegisteredAt));
     }
 
+    [Theory]
+    [InlineData("Agent\u0000Name", "HOST", "Windows", "1.0.0")]
+    [InlineData("Agent", "HOST\r\nFORGED", "Windows", "1.0.0")]
+    [InlineData("Agent", "HOST", "Windows\t11", "1.0.0")]
+    [InlineData("Agent", "HOST", "Windows", "1.0\u007F.0")]
+    public void CreateRejectsControlCharactersInMetadata(
+        string name,
+        string machineName,
+        string operatingSystem,
+        string version)
+    {
+        Assert.Throws<ArgumentException>(() => DomainAgent.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            name,
+            machineName,
+            operatingSystem,
+            version,
+            new string('a', DomainAgent.CredentialHashLength),
+            RegisteredAt));
+    }
+
     [Fact]
     public void RecordHeartbeatPreservesLatestTimestamp()
     {

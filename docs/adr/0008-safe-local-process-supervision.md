@@ -14,9 +14,11 @@ component through a per-ServerInstance registry.
 
 ## Decision
 
-- Accept only bounded, absolute Windows drive or UNC paths without device namespaces or
-  `.`/`..` segments. Verify that the executable and working directory exist locally
-  immediately before launch.
+- Accept only paths within the same 2,048-character bound enforced by the persisted
+  ServerInstance contract. Require an absolute Windows drive path or a UNC path containing
+  both server and share, and reject control characters, device namespaces (including mixed
+  slash forms) and `.`/`..` segments. Verify that the executable and working directory exist
+  locally immediately before launch.
 - In the MVP supervisor, accept only a native `.exe` whose file name matches the stored
   process name. Start it with `UseShellExecute = false` and `CreateNoWindow = true`.
   Arguments are passed to that executable, never to `cmd.exe`, PowerShell or a shell.
@@ -56,7 +58,8 @@ component through a per-ServerInstance registry.
 
 ## Verification evidence
 
-- Unit tests cover configuration rejection, duplicate start prevention, running and
+- Unit tests cover the shared API/Agent path-length boundary, device-namespace and malformed
+  UNC rejection, control-character rejection, duplicate start prevention, running and
   stopped decisions, stale PID detection, and graceful versus forced stop policy.
 - A harmless executable fixture verifies real start, inspection and stop behavior on
   Windows without invoking a shell.

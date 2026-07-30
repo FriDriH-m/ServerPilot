@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   serverPilotApi,
   type AgentSummary,
@@ -28,6 +28,9 @@ interface WorkspacePageProps {
 
 type FormMode = "create" | "edit" | null;
 
+const overviewRefreshIntervalMilliseconds = 15_000;
+const detailRefreshIntervalMilliseconds = 10_000;
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -54,6 +57,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
     useState<ServerInstanceDetails | null>(null);
   const [commands, setCommands] = useState<ServerCommand[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const hasLoadedAdditionalCommandPages = useRef(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -67,7 +71,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
   const accessToken = session?.accessToken ?? "";
 
   const refreshOverview = useCallback(
-    async (background = false) => {
+    async (background = false, signal?: AbortSignal) => {
       if (!accessToken) {
         return;
       }
@@ -77,9 +81,13 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
       }
       try {
         const [agentItems, serverItems] = await Promise.all([
-          api.listAgents(accessToken),
-          api.listServerInstances(accessToken),
+          api.listAgents(accessToken, signal),
+          api.listServerInstances(accessToken, signal),
         ]);
+        if (signal?.aborted) {
+          return;
+        }
+
         setAgents(agentItems);
         setServers(serverItems);
         setSelectedServerId((current) =>
@@ -93,7 +101,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
           setOverviewError(error);
         }
       } finally {
-        if (!background) {
+        if (!background && !signal?.aborted) {
           setInitialLoading(false);
         }
       }
@@ -102,9 +110,26 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
   );
 
   useEffect(() => {
-    void refreshOverview();
-    const timer = window.setInterval(() => void refreshOverview(true), 10_000);
-    return () => window.clearInterval(timer);
+    const controller = new AbortController();
+    let timer: number | undefined;
+
+    async function refreshAndSchedule(background: boolean) {
+      await refreshOverview(background, controller.signal);
+      if (!controller.signal.aborted) {
+        timer = window.setTimeout(
+          () => void refreshAndSchedule(true),
+          overviewRefreshIntervalMilliseconds,
+        );
+      }
+    }
+
+    void refreshAndSchedule(false);
+    return () => {
+      controller.abort();
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
   }, [refreshOverview]);
 
   useEffect(() => {
@@ -120,7 +145,9 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
     setSelectedServer(null);
     setCommands([]);
     setNextCursor(null);
+    hasLoadedAdditionalCommandPages.current = false;
     setDetailError(null);
+    let timer: number | undefined;
 
     async function loadSelection() {
       setDetailLoading(true);
@@ -169,6 +196,9 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
         if (!disposed) {
           setSelectedServer(server);
           setCommands((current) => mergeCommands(current, history.items));
+          if (!hasLoadedAdditionalCommandPages.current) {
+            setNextCursor(history.nextCursor);
+          }
           setDetailError(null);
         }
       } catch (error) {
@@ -178,12 +208,33 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
       }
     }
 
-    void loadSelection();
-    const timer = window.setInterval(() => void refreshState(), 5_000);
+    async function loadAndSchedule() {
+      await loadSelection();
+      if (!disposed) {
+        timer = window.setTimeout(
+          () => void refreshAndSchedule(),
+          detailRefreshIntervalMilliseconds,
+        );
+      }
+    }
+
+    async function refreshAndSchedule() {
+      await refreshState();
+      if (!disposed) {
+        timer = window.setTimeout(
+          () => void refreshAndSchedule(),
+          detailRefreshIntervalMilliseconds,
+        );
+      }
+    }
+
+    void loadAndSchedule();
     return () => {
       disposed = true;
       controller.abort();
-      window.clearInterval(timer);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
     };
   }, [accessToken, api, selectedServerId]);
 
@@ -312,6 +363,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
       );
       setCommands((current) => mergeCommands(current, page.items));
       setNextCursor(page.nextCursor);
+      hasLoadedAdditionalCommandPages.current = true;
     } catch (error) {
       setDetailError(error);
     } finally {

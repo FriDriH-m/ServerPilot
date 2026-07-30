@@ -190,4 +190,31 @@ describe("management dashboard", () => {
     );
     expect(await screen.findByText("Project Zomboid was created.")).toBeInTheDocument();
   });
+
+  it("schedules non-overlapping refreshes within the default API rate-limit budget", async () => {
+    const setIntervalSpy = vi.spyOn(window, "setInterval");
+    const setTimeoutSpy = vi.spyOn(window, "setTimeout");
+    const api = createManagementApi();
+
+    try {
+      await renderAuthenticated(api);
+      await waitFor(() => {
+        expect(api.getServerInstance).toHaveBeenCalledOnce();
+        expect(api.listServerCommands).toHaveBeenCalledOnce();
+      });
+      await waitFor(() => {
+        const scheduledDelays = setTimeoutSpy.mock.calls.map((call) => call[1]);
+        expect(scheduledDelays).toContain(15_000);
+        expect(scheduledDelays).toContain(10_000);
+      });
+
+      const intervalDelays = setIntervalSpy.mock.calls.map((call) => call[1]);
+      expect(intervalDelays).not.toContain(5_000);
+      expect(intervalDelays).not.toContain(10_000);
+      expect(intervalDelays).not.toContain(15_000);
+    } finally {
+      setIntervalSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+    }
+  });
 });
