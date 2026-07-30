@@ -76,7 +76,9 @@ ASP.NET Core API.
 - чтение логов;
 - создание резервных копий.
 
-На этапе разработки Agent должен поддерживать запуск как обычное консольное приложение. Позже он будет устанавливаться как Windows Service.
+Agent поддерживает обычный консольный запуск для разработки и self-contained установку
+как Windows Service для постоянной работы. Служебный режим описан в
+[`docs/windows-agent-service.md`](docs/windows-agent-service.md).
 
 ### ServerPilot.Worker
 
@@ -210,6 +212,7 @@ API
 - [`docs/product.md`](docs/product.md) — полное описание проекта и целевой архитектуры.
 - [`docs/mvp.md`](docs/mvp.md) — границы первой версии.
 - [`docs/e2e-validation.md`](docs/e2e-validation.md) — воспроизводимая Windows end-to-end проверка полного MVP и ручной сценарий.
+- [`docs/windows-agent-service.md`](docs/windows-agent-service.md) — сборка, установка, обновление и диагностика Windows Service Agent.
 - [`docs/api-conventions.md`](docs/api-conventions.md) — контракты API, валидация, Problem Details и correlation ID.
 - [`docs/adr/0001-user-password-and-jwt-authentication.md`](docs/adr/0001-user-password-and-jwt-authentication.md) — решение по password hashing и JWT.
 - [`docs/adr/0002-one-time-agent-installation-tokens.md`](docs/adr/0002-one-time-agent-installation-tokens.md) — решение по одноразовым installation tokens.
@@ -223,6 +226,7 @@ API
 - [`docs/adr/0010-agent-process-state-reconciliation.md`](docs/adr/0010-agent-process-state-reconciliation.md) — решение по Agent-authoritative process state, safe restart rediscovery и offline semantics.
 - [`docs/adr/0011-compose-migration-startup.md`](docs/adr/0011-compose-migration-startup.md) — решение по one-shot Compose migrations, readiness и clean reset.
 - [`docs/adr/0012-browser-access-token-handling.md`](docs/adr/0012-browser-access-token-handling.md) — решение по memory-only JWT, same-origin Web/API и безопасному отображению ошибок.
+- [`docs/adr/0013-windows-service-agent-delivery.md`](docs/adr/0013-windows-service-agent-delivery.md) — решение по service identity, DPAPI/ACL, доставке и recovery Windows Agent.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -395,8 +399,8 @@ Authorization: Agent spac_<64 uppercase hex characters>
 
 ### Bootstrap и локальное хранение Agent credential
 
-`ServerPilot.Agent` запускается как консольный Worker. До старта фоновых циклов он
-валидирует конфигурацию, затем при первом запуске регистрируется через
+`ServerPilot.Agent` запускается как консольный Worker или Windows Service. До старта
+фоновых циклов он валидирует конфигурацию, затем при первом запуске регистрируется через
 `POST /api/agents/register`. Одноразовый installation token задаётся только извне и
 нужен только пока нет сохранённого credential:
 
@@ -411,8 +415,8 @@ dotnet run --project src/ServerPilot.Agent
 ```
 
 Для локальной разработки допустим `http://localhost` или `http://127.0.0.1`; любой
-не-loopback URL должен использовать HTTPS. Token и выданный credential не записываются
-в `appsettings.json` и не логируются. После успешной регистрации credential вместе с
+не-loopback URL должен использовать HTTPS. В консольном режиме token и выданный credential
+не записываются в `appsettings.json` и не логируются. После успешной регистрации credential вместе с
 Agent ID сохраняется атомарно в
 `%LOCALAPPDATA%\ServerPilot\agent-credential.dat`, зашифрованный Windows DPAPI для
 текущего пользователя. Последующие запуски используют это хранилище и не требуют token.
@@ -421,6 +425,23 @@ Agent ID сохраняется атомарно в
 пользователем: потребуется новый installation token. Если credential считается
 скомпрометированным, сначала отзовите его через API, затем удалите локальный файл и
 зарегистрируйте Agent заново.
+
+### Windows Service Agent
+
+Self-contained `win-x64` пакет собирается командой:
+
+```powershell
+./eng/agent/Publish-AgentPackage.ps1
+```
+
+Служба `ServerPilot.Agent` работает под отдельной виртуальной учётной записью,
+автоматически запускается после перезагрузки и пишет события в Windows Application log.
+Её конфигурация и DPAPI `CurrentUser` credential находятся в restricted каталоге
+`%ProgramData%\ServerPilot\Agent`; консольный режим по-прежнему использует
+`%LOCALAPPDATA%\ServerPilot`. Установка не даёт службе доступ ко всему диску: права
+`Modify` выдаются только явно указанным каталогам серверов. Полные команды установки,
+обновления, start/stop, удаления и диагностики приведены в
+[`docs/windows-agent-service.md`](docs/windows-agent-service.md).
 
 ### Heartbeat и polling Agent
 
@@ -568,7 +589,8 @@ CI и локальная разработка используют один ка
 ./eng/verify.ps1
 ```
 
-Он выполняет NuGet restore/audit, Release build, formatting, deterministic frontend
+Он выполняет NuGet restore/audit, Release build, formatting, self-contained `win-x64`
+publish Agent и проверку PowerShell package tooling, deterministic frontend
 install/audit/tests/build, unit- и PostgreSQL integration-тесты, проверку соответствия
 EF-модели миграциям, проверку Compose и сборку Docker-образа API. `-SkipDockerBuild`
 пропускает только последнюю операцию.
@@ -648,3 +670,6 @@ post-MVP roadmap и не расширяет этот сценарий неявн
 защищённым routing и единым безопасным отображением Problem Details. Issue #36 расширяет
 его management dashboard: Agents, CRUD ServerInstance, безопасные Start/Stop controls,
 backend-authoritative process state, PID, latest result и cursor-based command history.
+Issue #37 добавляет self-contained Windows Service Agent: отдельную виртуальную учётную
+запись, restricted ProgramData/DPAPI storage, delayed auto-start, recovery, безопасный
+upgrade/uninstall и явные ACL для каталогов управляемых серверов. Консольный режим сохранён.

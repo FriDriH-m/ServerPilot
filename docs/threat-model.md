@@ -7,8 +7,9 @@ credential storage, authenticated heartbeat/polling loops, persisted ServerInsta
 process configuration, owner-created ServerCommand history and Agent-authenticated
 command claim/result updates, the Windows Agent local-process supervisor and the staged,
 idempotent command executor, persisted process identity, restart reconciliation and
-offline ServerInstance semantics, plus the post-MVP browser authentication client and
-its in-memory access-token lifecycle.
+offline ServerInstance semantics, the post-MVP browser authentication client and its
+in-memory access-token lifecycle, plus Windows Service packaging, virtual service identity,
+restricted ProgramData credential storage and explicit managed-server directory grants.
 
 ## Data flow and trust boundaries
 
@@ -41,6 +42,17 @@ Registered Agent
   | current Windows user + DPAPI CurrentUser protection
   v
 %LOCALAPPDATA%\ServerPilot\agent-credential.dat: encrypted Agent ID, scheme and credential
+
+Windows Service Control Manager
+  | delayed-auto start + bounded crash recovery
+  v
+ServerPilot.Agent under NT SERVICE\ServerPilot.Agent
+  | DPAPI CurrentUser + restricted service SID ACL
+  v
+%ProgramData%\ServerPilot\Agent: configuration + encrypted Agent credential
+  | explicit Modify ACL only for selected server roots
+  v
+Stored ServerInstance executable and working directory
 
 User/client -> ASP.NET Core API -> PostgreSQL: owner-scoped Agent metadata query
   | response: safe metadata + derived Online/Offline state
@@ -115,7 +127,11 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Cross-user token or Agent access | Installation-token operations, Agent reads and credential revocation are scoped to the JWT subject; foreign IDs return 404 | Every future owned resource must preserve the same owner-scoped query pattern |
 | Reuse of expired, revoked or used installation token | Agent creation and conditional token consumption share one transaction; inactive/concurrently consumed tokens update zero rows | PostgreSQL remains the single registration authority |
 | Agent credential disclosed by database | 256 random bits; only a SHA-256 hash is persisted and indexed | The raw bearer credential is stored only on the registered Windows Agent |
-| Local Agent credential file is copied or read by another user | The payload is encrypted by Windows DPAPI with `CurrentUser` scope and stored under the current user's local application-data directory; atomic replacement avoids a partially written credential | Malware or an interactive process running as the same Windows user can still use DPAPI; protect that account and revoke/re-register if compromise is suspected |
+| Local Agent credential file is copied or read by another user | The payload is encrypted by Windows DPAPI with `CurrentUser` scope. Console mode uses the interactive user's local application-data directory. Service mode uses restricted ProgramData accessible only to `SYSTEM`, administrators and its stable virtual service SID; atomic replacement avoids a partially written credential | Malware running as the matching interactive/service identity or a local administrator can still use DPAPI; protect those principals and revoke/re-register if compromise is suspected |
+| Installation token remains on a service host after registration | The installer accepts a `SecureString`, writes the token only to the restricted ProgramData configuration, waits for the DPAPI credential and atomically removes the token property | A failed initial registration deliberately retains the restricted token for diagnosis; the operator must retry promptly or revoke it |
+| Agent service receives excessive local privilege | The service uses `NT SERVICE\ServerPilot.Agent`, not `LocalSystem`; binaries are read/execute, data is modify, and managed roots are granted only when explicitly named. Drive/share roots and the Windows directory are rejected | `Modify` permits changing any file inside a granted root; operators must dedicate the smallest practical server directory and protect administrator access |
+| Malicious or partial Agent upgrade replaces trusted code | Update stops the service, stages a complete package, swaps directories, reapplies ACLs and restores the previous directory on failure | Code signing and automatic provenance verification are outside #37; operators must obtain packages from a trusted build channel |
+| Unexpected Agent crash leaves it offline indefinitely | SCM delayed-auto startup and three bounded recovery restarts cover reboot and unexpected process termination; existing Agent request retries remain bounded | Intentional stop and normal shutdown after revoked credentials or invalid configuration do not trigger endless recovery; operator action is required |
 | User/Agent principal confusion | User endpoints use the default Bearer JWT scheme; Agent endpoints require an explicit Agent policy and claim | Every future heartbeat/command endpoint must select the Agent policy |
 | Stolen or revoked Agent credential | Authentication checks the hash and `credential_revoked_at` in PostgreSQL on every request; the owner can revoke credentials | Credentials do not expire or rotate automatically in the MVP; an in-flight request is not cancelled |
 | Agent submits heartbeat for another Agent | The route ID must equal the exact Agent ID resolved by authentication; mismatches return 404 and do not write | A credential still acts as its own Agent until revoked |
@@ -159,8 +175,13 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 - Never render an arbitrary API error body; unexpected `5xx` content remains generic.
 - Never persist or return the raw Agent installation token after its creation response.
 - Never persist, log or return the raw Agent credential after registration.
-- Persist the Agent credential only in the current Windows user's DPAPI-protected local
-  storage; never commit it or keep it in `appsettings.json`.
+- Persist the Agent credential only with DPAPI `CurrentUser`: interactive console mode uses
+  `%LOCALAPPDATA%`, while Windows Service mode uses restricted `%ProgramData%` owned by its
+  stable virtual service identity. Never commit it or keep it in `appsettings.json`.
+- Never run the Agent service as `LocalSystem` or grant a drive/share root by default.
+- Keep the one-time service installation token out of command-line history, remove it from
+  restricted configuration after credential persistence, and never log it.
+- Preserve service configuration, credential and server data during update and uninstall.
 - Never authorize ownership from a user ID supplied in a request body or route.
 - Only accept JWTs matching the configured issuer, audience and signing algorithm.
 - Consume an installation token and create its Agent in one transaction.

@@ -12,7 +12,12 @@ public sealed class WindowsProtectedAgentCredentialStore : IAgentCredentialStore
     private readonly string credentialPath;
 
     public WindowsProtectedAgentCredentialStore()
-        : this(GetDefaultCredentialPath())
+        : this(isWindowsService: false)
+    {
+    }
+
+    internal WindowsProtectedAgentCredentialStore(bool isWindowsService)
+        : this(AgentCredentialPathResolver.GetCredentialPath(isWindowsService))
     {
     }
 
@@ -125,19 +130,6 @@ public sealed class WindowsProtectedAgentCredentialStore : IAgentCredentialStore
         {
             CryptographicOperations.ZeroMemory(payload);
         }
-    }
-
-    private static string GetDefaultCredentialPath()
-    {
-        string localApplicationData = Environment.GetFolderPath(
-            Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrWhiteSpace(localApplicationData))
-        {
-            throw new InvalidOperationException(
-                "The current user's local application-data directory is unavailable.");
-        }
-
-        return Path.Combine(localApplicationData, "ServerPilot", "agent-credential.dat");
     }
 
     private sealed record PersistedAgentCredential(

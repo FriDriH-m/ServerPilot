@@ -1,9 +1,11 @@
+using ServerPilot.Agent.Bootstrap;
 using ServerPilot.Agent.Looping;
 using ServerPilot.Agent.Runtime;
 
 namespace ServerPilot.Agent;
 
 public sealed class AgentWorker(
+    AgentBootstrapService bootstrap,
     AgentRuntime runtime,
     AgentLoopService loops,
     IHostApplicationLifetime applicationLifetime,
@@ -29,12 +31,15 @@ public sealed class AgentWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        Guid agentId = runtime.GetCredential().AgentId;
+        AgentBootstrapResult bootstrapResult = await bootstrap.InitializeAsync(stoppingToken);
+        runtime.Initialize(bootstrapResult.Credential);
+
+        Guid agentId = bootstrapResult.Credential.AgentId;
         LogAgentStarted(logger, agentId, null);
 
         try
         {
-            await loops.RunAsync(runtime.GetCredential(), stoppingToken);
+            await loops.RunAsync(bootstrapResult.Credential, stoppingToken);
         }
         catch (AgentLoopFatalException exception)
         {
