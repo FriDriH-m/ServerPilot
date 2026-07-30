@@ -1,9 +1,14 @@
 import { useAuth } from "./auth/auth-context";
+import type { ManagementApi } from "./api/server-pilot-api";
 import { AuthPage } from "./pages/auth-page";
 import { WorkspacePage } from "./pages/workspace-page";
 import { Navigate, usePathname } from "./router";
 
-export function AppRoutes() {
+interface AppRoutesProps {
+  managementApi?: ManagementApi;
+}
+
+export function AppRoutes({ managementApi }: AppRoutesProps) {
   const pathname = usePathname();
   const { isAuthenticated } = useAuth();
 
@@ -25,7 +30,7 @@ export function AppRoutes() {
   }
 
   if (pathname === "/app" && isAuthenticated) {
-    return <WorkspacePage />;
+    return <WorkspacePage api={managementApi} />;
   }
 
   return <Navigate to="/app" replace />;

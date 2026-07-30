@@ -86,4 +86,47 @@ describe("ServerPilotApi", () => {
       api.login({ email: "owner@example.test", password: "not-a-real-password" }),
     ).rejects.toThrow("ServerPilot is temporarily unavailable. Please try again.");
   });
+
+  it("uses bearer authentication for management reads", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json([]),
+    );
+    const api = new ServerPilotApi("/api", fetchImplementation);
+
+    await api.listAgents("access-token");
+
+    expect(fetchImplementation).toHaveBeenCalledWith(
+      "/api/agents?limit=100&page=1",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({ Authorization: "Bearer access-token" }),
+        credentials: "omit",
+      }),
+    );
+  });
+
+  it("encodes an opaque command-history cursor", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ items: [], nextCursor: null }),
+    );
+    const api = new ServerPilotApi("/api", fetchImplementation);
+
+    await api.listServerCommands("access-token", "server-1", "time+id=/");
+
+    expect(fetchImplementation).toHaveBeenCalledWith(
+      "/api/server-instances/server-1/commands?limit=20&cursor=time%2Bid%3D%2F",
+      expect.any(Object),
+    );
+  });
+
+  it("accepts an empty successful delete response", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+    const api = new ServerPilotApi("/api", fetchImplementation);
+
+    await expect(
+      api.deleteServerInstance("access-token", "server-1"),
+    ).resolves.toBeUndefined();
+  });
 });

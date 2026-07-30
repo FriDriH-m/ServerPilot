@@ -320,7 +320,12 @@ npm run dev
 
 JWT хранится только в памяти вкладки: logout, expiry, reload или закрытие вкладки
 завершают browser session. Это намеренный security trade-off текущей foundation;
-dashboard, Agent/server management и command controls остаются scope issue #36.
+после reload нужно войти снова. Management dashboard показывает online/offline Agents,
+позволяет создавать, изменять и удалять ServerInstance, отправлять подтверждённые
+`StartServer`/`StopServer` и просматривать cursor-based историю команд. Списки обновляются
+каждые 10 секунд, состояние выбранного процесса — каждые 5 секунд. Принятая API команда
+отображается как queued/pending и не считается доказательством запуска или остановки:
+фактический status и PID меняются только после нового отчёта Agent.
 
 Проверка форматирования:
 
@@ -640,5 +645,6 @@ reported snapshot, а не вымышленный `Stopped`.
 `eng/verify.ps1` и Windows-only `eng/verify-e2e.ps1`. Дальнейшая работа выбирается из
 post-MVP roadmap и не расширяет этот сценарий неявно. Post-MVP issue #35 добавляет
 минимальный React/TypeScript client с регистрацией, login/logout, memory-only JWT,
-защищённым routing и единым безопасным отображением Problem Details; dashboards и
-операции над Agent/ServerInstance намеренно остаются следующей отдельной задачей.
+защищённым routing и единым безопасным отображением Problem Details. Issue #36 расширяет
+его management dashboard: Agents, CRUD ServerInstance, безопасные Start/Stop controls,
+backend-authoritative process state, PID, latest result и cursor-based command history.
