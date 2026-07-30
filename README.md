@@ -119,7 +119,8 @@ ServerPilot/
 │   ├── ServerPilot.Application/
 │   ├── ServerPilot.Infrastructure/
 │   ├── ServerPilot.Api/
-│   └── ServerPilot.Agent/
+│   ├── ServerPilot.Agent/
+│   └── ServerPilot.Web/
 ├── tests/
 │   ├── ServerPilot.UnitTests/
 │   └── ServerPilot.IntegrationTests/
@@ -175,7 +176,7 @@ Agent → собственные abstractions и HTTP-контракты
 - xUnit;
 - Docker Compose.
 
-На первом этапе не используются:
+В завершённом MVP не использовались:
 
 - RabbitMQ;
 - Redis;
@@ -183,7 +184,7 @@ Agent → собственные abstractions и HTTP-контракты
 - Grafana;
 - Loki;
 - MinIO;
-- React.
+- React (минимальная post-MVP Web foundation добавляется отдельно).
 
 Они будут добавляться после появления рабочего основного сценария.
 
@@ -221,6 +222,7 @@ API
 - [`docs/adr/0009-idempotent-agent-command-execution.md`](docs/adr/0009-idempotent-agent-command-execution.md) — решение по staged-выполнению команд и retry без повторения process action.
 - [`docs/adr/0010-agent-process-state-reconciliation.md`](docs/adr/0010-agent-process-state-reconciliation.md) — решение по Agent-authoritative process state, safe restart rediscovery и offline semantics.
 - [`docs/adr/0011-compose-migration-startup.md`](docs/adr/0011-compose-migration-startup.md) — решение по one-shot Compose migrations, readiness и clean reset.
+- [`docs/adr/0012-browser-access-token-handling.md`](docs/adr/0012-browser-access-token-handling.md) — решение по memory-only JWT, same-origin Web/API и безопасному отображению ошибок.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -297,6 +299,28 @@ dotnet build
 ```bash
 dotnet test
 ```
+
+### Локальный запуск Web client
+
+`ServerPilot.Web` использует React, TypeScript и Vite. Требуется Node.js 24 и npm.
+Сначала запустите API через Compose и дождитесь `GET /health/ready`, затем:
+
+```powershell
+Copy-Item src/ServerPilot.Web/.env.example src/ServerPilot.Web/.env.local
+Set-Location src/ServerPilot.Web
+npm ci
+npm run dev
+```
+
+Откройте `http://127.0.0.1:5173/`. По умолчанию браузер обращается к same-origin
+`/api`, а Vite proxy передаёт запросы на `http://127.0.0.1:8080`. Если Compose API
+использует другой порт, измените `SERVERPILOT_API_PROXY_TARGET` в `.env.local`.
+`VITE_API_BASE_URL` задаёт публичный API base URL сборки и не является местом для
+секретов. Для non-loopback deployment он должен вести на HTTPS API.
+
+JWT хранится только в памяти вкладки: logout, expiry, reload или закрытие вкладки
+завершают browser session. Это намеренный security trade-off текущей foundation;
+dashboard, Agent/server management и command controls остаются scope issue #36.
 
 Проверка форматирования:
 
@@ -539,9 +563,10 @@ CI и локальная разработка используют один ка
 ./eng/verify.ps1
 ```
 
-Он выполняет NuGet restore/audit, Release build, formatting, unit- и PostgreSQL
-integration-тесты, проверку соответствия EF-модели миграциям, проверку Compose и
-сборку Docker-образа API. `-SkipDockerBuild` пропускает только последнюю операцию.
+Он выполняет NuGet restore/audit, Release build, formatting, deterministic frontend
+install/audit/tests/build, unit- и PostgreSQL integration-тесты, проверку соответствия
+EF-модели миграциям, проверку Compose и сборку Docker-образа API. `-SkipDockerBuild`
+пропускает только последнюю операцию.
 
 Integration-тесты используют Testcontainers и создают временный PostgreSQL-контейнер из образа `postgres:18.4-alpine`. На GitHub-hosted Ubuntu runner Docker уже доступен, поэтому отдельный PostgreSQL service container и credentials в workflow не нужны. Для локального запуска integration-тестов должен работать Docker Desktop или другой совместимый Docker daemon.
 
@@ -613,4 +638,7 @@ reported snapshot, а не вымышленный `Stopped`.
 
 Минимальный вертикальный сценарий реализован и воспроизводимо проверяется через
 `eng/verify.ps1` и Windows-only `eng/verify-e2e.ps1`. Дальнейшая работа выбирается из
-post-MVP roadmap и не расширяет этот сценарий неявно.
+post-MVP roadmap и не расширяет этот сценарий неявно. Post-MVP issue #35 добавляет
+минимальный React/TypeScript client с регистрацией, login/logout, memory-only JWT,
+защищённым routing и единым безопасным отображением Problem Details; dashboards и
+операции над Agent/ServerInstance намеренно остаются следующей отдельной задачей.

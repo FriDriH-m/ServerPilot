@@ -66,6 +66,16 @@ Agent открывает command scope с `AgentId`, `ServerInstanceId`, `Comman
 токены, authorization headers, пароли, пути, аргументы запуска, request bodies или raw
 failure details.
 
+## Web client error handling
+
+- Web client parses an error body only when the response declares
+  `application/problem+json`; arbitrary HTML or text responses are never rendered.
+- Validation messages and safe expected-error `detail` values may be shown to the user.
+- Unexpected `5xx` responses always produce a generic message, even if a response body
+  is present.
+- `correlationId` may be shown as a support reference, but access tokens, passwords and
+  request bodies must never be included in an error message or client log.
+
 ## Authentication schemes
 
 - Пользовательские endpoint принимают `Authorization: Bearer <jwt>` и получают user ID

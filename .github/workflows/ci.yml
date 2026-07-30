@@ -33,6 +33,13 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 24.x
+          cache: npm
+          cache-dependency-path: src/ServerPilot.Web/package-lock.json
+
       - name: Run canonical verification
         shell: pwsh
         run: ./eng/verify.ps1 -Ci

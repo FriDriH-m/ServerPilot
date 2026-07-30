@@ -1,0 +1,351 @@
+:root {
+  color: #e7edf7;
+  background: #07101d;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 12% 10%, rgb(39 86 137 / 28%), transparent 34rem),
+    linear-gradient(145deg, #07101d 0%, #0b1422 55%, #111826 100%);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+a {
+  color: #71c9ff;
+}
+
+.auth-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(28rem, 0.9fr);
+}
+
+.auth-intro,
+.auth-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(2rem, 6vw, 7rem);
+}
+
+.auth-intro {
+  max-width: 54rem;
+}
+
+.brand-mark,
+.wordmark-icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border: 1px solid rgb(113 201 255 / 55%);
+  border-radius: 0.9rem;
+  background: linear-gradient(145deg, rgb(113 201 255 / 22%), rgb(91 91 217 / 22%));
+  color: #b9e5ff;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  box-shadow: 0 0 2.5rem rgb(76 170 230 / 18%);
+}
+
+.eyebrow {
+  margin: 1.75rem 0 0.75rem;
+  color: #6ec7f4;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.auth-intro h1,
+.workspace-content h1 {
+  max-width: 16ch;
+  margin: 0;
+  font-size: clamp(2.8rem, 6vw, 5.7rem);
+  line-height: 0.98;
+  letter-spacing: -0.06em;
+}
+
+.auth-intro > p:not(.eyebrow),
+.workspace-lead {
+  max-width: 41rem;
+  margin: 1.5rem 0 0;
+  color: #9dacbf;
+  font-size: clamp(1rem, 1.6vw, 1.25rem);
+  line-height: 1.7;
+}
+
+.signal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 2rem;
+}
+
+.signal-row span {
+  padding: 0.55rem 0.8rem;
+  border: 1px solid #23334a;
+  border-radius: 999px;
+  color: #aab8c9;
+  font-size: 0.8rem;
+}
+
+.auth-panel {
+  border-left: 1px solid rgb(139 163 191 / 12%);
+  background: rgb(4 11 20 / 36%);
+  backdrop-filter: blur(1rem);
+}
+
+.auth-card {
+  width: min(100%, 29rem);
+  margin: 0 auto;
+}
+
+.auth-card h2 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: -0.035em;
+}
+
+.muted,
+.auth-switch,
+.field-hint {
+  color: #8e9eb2;
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 2rem;
+}
+
+.auth-form label {
+  margin-top: 0.5rem;
+  color: #cbd7e6;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.auth-form input {
+  width: 100%;
+  padding: 0.9rem 1rem;
+  border: 1px solid #2a3a50;
+  border-radius: 0.75rem;
+  outline: none;
+  color: #edf6ff;
+  background: #0d1726;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.auth-form input:focus {
+  border-color: #60bbec;
+  box-shadow: 0 0 0 3px rgb(96 187 236 / 13%);
+}
+
+.auth-form input:disabled {
+  opacity: 0.65;
+}
+
+.field-hint {
+  font-size: 0.78rem;
+}
+
+.primary-button,
+.secondary-button {
+  border: 0;
+  border-radius: 0.75rem;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.primary-button {
+  margin-top: 1.15rem;
+  padding: 0.95rem 1rem;
+  color: #04101a;
+  background: linear-gradient(135deg, #8ed8ff, #5fbcec);
+  box-shadow: 0 0.8rem 2rem rgb(50 155 218 / 18%);
+}
+
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.auth-switch {
+  margin-top: 1.5rem;
+  font-size: 0.9rem;
+}
+
+.error-alert {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 1.25rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgb(255 126 126 / 35%);
+  border-radius: 0.75rem;
+  color: #ffc5c5;
+  background: rgb(106 28 35 / 24%);
+  font-size: 0.88rem;
+}
+
+.error-alert small {
+  color: #d49da3;
+}
+
+.workspace-shell {
+  min-height: 100vh;
+}
+
+.workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 1rem clamp(1.25rem, 5vw, 5rem);
+  border-bottom: 1px solid rgb(139 163 191 / 14%);
+  background: rgb(5 12 21 / 76%);
+  backdrop-filter: blur(1rem);
+}
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  color: #edf6ff;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.wordmark-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.7rem;
+  font-size: 0.78rem;
+}
+
+.account-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  color: #9eadc0;
+  font-size: 0.88rem;
+}
+
+.secondary-button {
+  padding: 0.65rem 0.9rem;
+  border: 1px solid #2b3c52;
+  color: #dbe9f7;
+  background: #111d2c;
+}
+
+.workspace-content {
+  padding: clamp(3rem, 8vw, 7rem) clamp(1.25rem, 8vw, 8rem);
+}
+
+.workspace-content .eyebrow {
+  margin-top: 0;
+}
+
+.workspace-content h1 {
+  font-size: clamp(2.8rem, 6vw, 5rem);
+}
+
+.foundation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  max-width: 64rem;
+  margin-top: 3rem;
+}
+
+.foundation-grid article {
+  padding: 1.5rem;
+  border: 1px solid #22334a;
+  border-radius: 1rem;
+  background: rgb(15 26 42 / 72%);
+}
+
+.foundation-grid h2 {
+  margin: 1.2rem 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.foundation-grid p {
+  margin: 0;
+  color: #91a1b4;
+  line-height: 1.6;
+}
+
+.status-dot {
+  display: block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: #6fe2a2;
+  box-shadow: 0 0 1rem rgb(111 226 162 / 70%);
+}
+
+.status-dot-muted {
+  background: #6d8098;
+  box-shadow: none;
+}
+
+@media (max-width: 840px) {
+  .auth-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-intro {
+    min-height: 44vh;
+  }
+
+  .auth-panel {
+    border-top: 1px solid rgb(139 163 191 / 12%);
+    border-left: 0;
+  }
+
+  .foundation-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .auth-intro,
+  .auth-panel {
+    padding: 2rem 1.25rem;
+  }
+
+  .workspace-header,
+  .account-actions {
+    align-items: flex-start;
+  }
+
+  .workspace-header {
+    flex-direction: column;
+  }
+
+  .account-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

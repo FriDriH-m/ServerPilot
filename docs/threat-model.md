@@ -7,13 +7,15 @@ credential storage, authenticated heartbeat/polling loops, persisted ServerInsta
 process configuration, owner-created ServerCommand history and Agent-authenticated
 command claim/result updates, the Windows Agent local-process supervisor and the staged,
 idempotent command executor, persisted process identity, restart reconciliation and
-offline ServerInstance semantics.
+offline ServerInstance semantics, plus the post-MVP browser authentication client and
+its in-memory access-token lifecycle.
 
 ## Data flow and trust boundaries
 
 ```text
-User/client
-  | HTTPS: email + password, then bearer JWT
+Browser Web Client
+  | same-origin HTTPS: email + password, then bearer JWT
+  | JWT exists only in React memory until logout, expiry, reload or tab close
   v
 ASP.NET Core API
   | HTTPS response once: raw Agent installation token
@@ -79,7 +81,9 @@ Process supervisor boundary
 Windows process: bounded graceful wait, then explicit logged forced termination
 ```
 
-The client/API, Compose migration/API and API/PostgreSQL transitions are trust boundaries. The JWT signing
+The browser/API, Compose migration/API and API/PostgreSQL transitions are trust boundaries.
+The browser API base URL is public build configuration and defaults to same-origin `/api`;
+the local Vite proxy target is development tooling, not a browser credential. The JWT signing
 key is process configuration and never crosses to PostgreSQL or source control. The
 raw installation token crosses the API boundary only in its creation response and is
 not recoverable from persisted data. The raw Agent credential is likewise returned once,
@@ -100,6 +104,10 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Migration service retries a failing schema change indefinitely | The migration container has `restart: "no"` and its failure blocks the dependent API instead of hiding the fault | Compose does not provide production deployment orchestration or rollout coordination |
 | Local reset accidentally leaves or exposes persisted data | PostgreSQL data lives only in a named volume; normal shutdown preserves it and the documented reset explicitly removes it | `down --volumes` is destructive and local operators must confirm the target project before running it |
 | Credential response cached | JWT, raw installation-token and raw Agent-credential responses use `Cache-Control: no-store` | Clients must still protect credentials after receipt |
+| Browser storage exposes a user JWT after the session | The Web client keeps the token only in React memory and clears it on logout or expiry; reload and tab close discard it | Active same-origin JavaScript, extensions or a compromised device can still read/use the current bearer token |
+| Misconfigured frontend sends credentials to an unintended API | The default base URL is same-origin `/api`; local development changes only the server-side Vite proxy target; `VITE_API_BASE_URL` is documented as public trusted deployment configuration | Operators can still build a client with a malicious URL and must protect the build/deployment pipeline |
+| Post-login navigation becomes an external redirect | The return path must start with exactly one `/` and cannot contain a backslash; all other values fall back to `/app` | Additional routes must preserve local-only navigation validation |
+| Unexpected API error leaks internal response content into the page | The client parses declared Problem Details only, renders safe expected details and correlation IDs, and replaces every `5xx` body with a generic message | A future endpoint must continue using the same centralized client path |
 | Online credential guessing or token flooding | Fixed-window limits protect anonymous authentication and authenticated token endpoints; active token count and list size are bounded | Distributed deployments will need a shared or upstream limiter if per-process limits are insufficient |
 | Predictable installation credential | 256 random bits from .NET `RandomNumberGenerator`; a GUID or user identifier is never used as the credential | Entropy depends on the operating system CSPRNG |
 | Installation token disclosed by database or list API | PostgreSQL stores only a SHA-256 hash; list responses contain metadata only; raw value is returned once | A client that loses the response must revoke or wait for expiry and create another token |
@@ -144,6 +152,11 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 ## Security invariants
 
 - Never log passwords, password hashes, bearer tokens or signing keys.
+- Keep the browser user JWT in memory only; never persist it in Web Storage, IndexedDB,
+  URLs, logs or build configuration.
+- Treat frontend API URLs as public trusted deployment configuration and default browser
+  requests to same-origin `/api`.
+- Never render an arbitrary API error body; unexpected `5xx` content remains generic.
 - Never persist or return the raw Agent installation token after its creation response.
 - Never persist, log or return the raw Agent credential after registration.
 - Persist the Agent credential only in the current Windows user's DPAPI-protected local
