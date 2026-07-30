@@ -1,0 +1,193 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import type {
+  AgentSummary,
+  AuthenticationApi,
+  AuthenticationSession,
+  ManagementApi,
+  ServerCommand,
+  ServerInstanceDetails,
+} from "../api/server-pilot-api";
+import { AppRoutes } from "../app";
+import { AuthProvider } from "../auth/auth-context";
+
+const agent: AgentSummary = {
+  id: "agent-1",
+  name: "Windows Agent",
+  machineName: "GAME-HOST",
+  operatingSystem: "Windows",
+  version: "1.0.0",
+  registeredAt: "2026-07-30T08:00:00Z",
+  lastSeenAt: "2026-07-30T09:00:00Z",
+  status: "Online",
+};
+
+const server: ServerInstanceDetails = {
+  id: "server-1",
+  agentId: agent.id,
+  name: "Project Zomboid",
+  status: "Running",
+  reportedStatus: "Running",
+  lastProcessId: 4242,
+  lastProcessStartedAt: "2026-07-30T08:45:00Z",
+  lastStatusReportedAt: "2026-07-30T09:00:00Z",
+  isStateStale: false,
+  createdAt: "2026-07-30T08:00:00Z",
+  updatedAt: "2026-07-30T09:00:00Z",
+  executablePath: "C:\\Servers\\Zomboid\\server.exe",
+  arguments: "-port 16261",
+  workingDirectory: "C:\\Servers\\Zomboid",
+  processName: "server",
+};
+
+function createSession(): AuthenticationSession {
+  return {
+    userId: "user-1",
+    email: "owner@example.test",
+    accessToken: "access-token",
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+  };
+}
+
+function createManagementApi(
+  overrides: Partial<ManagementApi> = {},
+): ManagementApi {
+  return {
+    listAgents: vi.fn().mockResolvedValue([agent]),
+    listServerInstances: vi.fn().mockResolvedValue([server]),
+    getServerInstance: vi.fn().mockResolvedValue(server),
+    createServerInstance: vi.fn().mockResolvedValue(server),
+    updateServerInstance: vi.fn().mockResolvedValue(server),
+    deleteServerInstance: vi.fn().mockResolvedValue(undefined),
+    createServerCommand: vi.fn(),
+    listServerCommands: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    ...overrides,
+  };
+}
+
+async function renderAuthenticated(api: ManagementApi) {
+  const authenticationApi: AuthenticationApi = {
+    login: vi.fn().mockResolvedValue(createSession()),
+    register: vi.fn(),
+  };
+  window.history.replaceState(null, "", "/app");
+  render(
+    <AuthProvider api={authenticationApi}>
+      <AppRoutes managementApi={api} />
+    </AuthProvider>,
+  );
+
+  fireEvent.change(await screen.findByLabelText("Email"), {
+    target: { value: "owner@example.test" },
+  });
+  fireEvent.change(screen.getByLabelText("Password"), {
+    target: { value: "not-a-real-password" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await screen.findByRole("heading", { name: "Operate from backend truth." });
+}
+
+describe("management dashboard", () => {
+  it("shows backend state and does not treat an accepted command as process success", async () => {
+    const pendingStop: ServerCommand = {
+      id: "command-1",
+      agentId: agent.id,
+      serverInstanceId: server.id,
+      type: "StopServer",
+      status: "Pending",
+      createdAt: "2026-07-30T09:01:00Z",
+      claimedAt: null,
+      startedAt: null,
+      completedAt: null,
+      errorCode: null,
+      attemptCount: 0,
+      correlationId: "correlation-1",
+    };
+    const createServerCommand = vi.fn().mockResolvedValue(pendingStop);
+    const api = createManagementApi({ createServerCommand });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    await renderAuthenticated(api);
+
+    expect(await screen.findByText("PID")).toBeInTheDocument();
+    expect(screen.getByText("4242")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start server" })).toBeDisabled();
+    const stopButton = screen.getByRole("button", { name: "Stop server" });
+    expect(stopButton).toBeEnabled();
+    fireEvent.click(stopButton);
+
+    expect(
+      await screen.findByText(/accepted with status Pending/i),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Running").length).toBeGreaterThan(0);
+    expect(createServerCommand).toHaveBeenCalledWith(
+      "access-token",
+      server.id,
+      "stop",
+    );
+    expect(screen.getByRole("button", { name: "Stop server" })).toBeDisabled();
+  });
+
+  it("makes offline and stale state explicit and disables process actions", async () => {
+    const offlineAgent = { ...agent, status: "Offline" };
+    const staleServer = {
+      ...server,
+      status: "Unreachable",
+      reportedStatus: "Running",
+      isStateStale: true,
+    };
+    const api = createManagementApi({
+      listAgents: vi.fn().mockResolvedValue([offlineAgent]),
+      listServerInstances: vi.fn().mockResolvedValue([staleServer]),
+      getServerInstance: vi.fn().mockResolvedValue(staleServer),
+    });
+
+    await renderAuthenticated(api);
+
+    expect(await screen.findByText(/effective state is stale/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Offline").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Start server" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stop server" })).toBeDisabled();
+  });
+
+  it("creates a ServerInstance from the Agent-scoped form", async () => {
+    const created = { ...server, status: "Unknown", reportedStatus: "Unknown" };
+    const createServerInstance = vi.fn().mockResolvedValue(created);
+    const api = createManagementApi({
+      listServerInstances: vi.fn().mockResolvedValue([]),
+      createServerInstance,
+    });
+
+    await renderAuthenticated(api);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Add server" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add server" }));
+    fireEvent.change(screen.getByLabelText("Agent"), {
+      target: { value: agent.id },
+    });
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Project Zomboid" },
+    });
+    fireEvent.change(screen.getByLabelText("Executable path"), {
+      target: { value: server.executablePath },
+    });
+    fireEvent.change(screen.getByLabelText("Arguments"), {
+      target: { value: server.arguments },
+    });
+    fireEvent.change(screen.getByLabelText("Working directory"), {
+      target: { value: server.workingDirectory },
+    });
+    fireEvent.change(screen.getByLabelText("Process name"), {
+      target: { value: server.processName },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create server" }));
+
+    await waitFor(() => expect(createServerInstance).toHaveBeenCalledOnce());
+    expect(createServerInstance).toHaveBeenCalledWith(
+      "access-token",
+      expect.objectContaining({ agentId: agent.id, name: "Project Zomboid" }),
+    );
+    expect(await screen.findByText("Project Zomboid was created.")).toBeInTheDocument();
+  });
+});

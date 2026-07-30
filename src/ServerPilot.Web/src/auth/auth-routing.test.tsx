@@ -4,6 +4,7 @@ import { AppRoutes } from "../app";
 import type {
   AuthenticationApi,
   AuthenticationSession,
+  ManagementApi,
 } from "../api/server-pilot-api";
 import { AuthProvider } from "./auth-context";
 
@@ -16,11 +17,24 @@ function createSession(): AuthenticationSession {
   };
 }
 
+function createManagementApi(): ManagementApi {
+  return {
+    listAgents: vi.fn().mockResolvedValue([]),
+    listServerInstances: vi.fn().mockResolvedValue([]),
+    getServerInstance: vi.fn(),
+    createServerInstance: vi.fn(),
+    updateServerInstance: vi.fn(),
+    deleteServerInstance: vi.fn(),
+    createServerCommand: vi.fn(),
+    listServerCommands: vi.fn(),
+  };
+}
+
 function renderRoutes(api: AuthenticationApi, initialPath: string) {
   window.history.replaceState(null, "", initialPath);
   return render(
     <AuthProvider api={api}>
-      <AppRoutes />
+      <AppRoutes managementApi={createManagementApi()} />
     </AuthProvider>,
   );
 }
@@ -37,7 +51,7 @@ describe("authentication routing", () => {
     expect(
       await screen.findByRole("heading", { name: "Sign in" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("Your workspace is ready.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Operate from backend truth.")).not.toBeInTheDocument();
   });
 
   it("moves from login to an authenticated session and logs out", async () => {
@@ -58,7 +72,7 @@ describe("authentication routing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
     expect(
-      await screen.findByRole("heading", { name: "Your workspace is ready." }),
+      await screen.findByRole("heading", { name: "Operate from backend truth." }),
     ).toBeInTheDocument();
     expect(login).toHaveBeenCalledWith({
       email: "owner@example.test",
@@ -88,7 +102,7 @@ describe("authentication routing", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(
-      await screen.findByRole("heading", { name: "Your workspace is ready." }),
+      await screen.findByRole("heading", { name: "Operate from backend truth." }),
     ).toBeInTheDocument();
     expect(register).toHaveBeenCalledOnce();
   });
