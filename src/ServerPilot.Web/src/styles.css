@@ -300,6 +300,26 @@ button:disabled {
   gap: 0.65rem;
 }
 
+.list-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+  color: #8798ad;
+  font-size: 0.76rem;
+}
+
+.list-pagination > div {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.list-pagination .secondary-button {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.78rem;
+}
+
 .agent-list article,
 .server-list button,
 .history-item {
@@ -773,6 +793,11 @@ button:disabled {
   .server-facts,
   .server-form {
     grid-template-columns: 1fr;
+  }
+
+  .list-pagination {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .detail-panel,

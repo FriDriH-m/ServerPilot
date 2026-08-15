@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   serverPilotApi,
   type AgentSummary,
@@ -28,6 +28,10 @@ interface WorkspacePageProps {
 
 type FormMode = "create" | "edit" | null;
 
+const LIST_PAGE_SIZE = 100;
+const OVERVIEW_REFRESH_INTERVAL_MS = 15_000;
+const DETAIL_REFRESH_INTERVAL_MS = 10_000;
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -49,6 +53,8 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
   const { session, logout } = useAuth();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [servers, setServers] = useState<ServerInstanceSummary[]>([]);
+  const [agentPage, setAgentPage] = useState(1);
+  const [serverPage, setServerPage] = useState(1);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
   const [selectedServer, setSelectedServer] =
     useState<ServerInstanceDetails | null>(null);
@@ -63,6 +69,8 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
   const [detailError, setDetailError] = useState<unknown>(null);
   const [mutationError, setMutationError] = useState<unknown>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const overviewController = useRef<AbortController | null>(null);
+  const overviewRequestNumber = useRef(0);
 
   const accessToken = session?.accessToken ?? "";
 
@@ -72,14 +80,23 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
         return;
       }
 
+      overviewController.current?.abort();
+      const controller = new AbortController();
+      overviewController.current = controller;
+      const requestNumber = ++overviewRequestNumber.current;
+
       if (!background) {
         setInitialLoading(true);
       }
       try {
         const [agentItems, serverItems] = await Promise.all([
-          api.listAgents(accessToken),
-          api.listServerInstances(accessToken),
+          api.listAgents(accessToken, agentPage, controller.signal),
+          api.listServerInstances(accessToken, serverPage, controller.signal),
         ]);
+        if (requestNumber !== overviewRequestNumber.current) {
+          return;
+        }
+
         setAgents(agentItems);
         setServers(serverItems);
         setSelectedServerId((current) =>
@@ -89,22 +106,32 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
         );
         setOverviewError(null);
       } catch (error) {
-        if (!isAbortError(error)) {
+        if (
+          requestNumber === overviewRequestNumber.current &&
+          !isAbortError(error)
+        ) {
           setOverviewError(error);
         }
       } finally {
-        if (!background) {
+        if (requestNumber === overviewRequestNumber.current) {
           setInitialLoading(false);
         }
       }
     },
-    [accessToken, api],
+    [accessToken, agentPage, api, serverPage],
   );
 
   useEffect(() => {
     void refreshOverview();
-    const timer = window.setInterval(() => void refreshOverview(true), 10_000);
-    return () => window.clearInterval(timer);
+    const timer = window.setInterval(
+      () => void refreshOverview(true),
+      OVERVIEW_REFRESH_INTERVAL_MS,
+    );
+    return () => {
+      window.clearInterval(timer);
+      overviewRequestNumber.current += 1;
+      overviewController.current?.abort();
+    };
   }, [refreshOverview]);
 
   useEffect(() => {
@@ -179,7 +206,10 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
     }
 
     void loadSelection();
-    const timer = window.setInterval(() => void refreshState(), 5_000);
+    const timer = window.setInterval(
+      () => void refreshState(),
+      DETAIL_REFRESH_INTERVAL_MS,
+    );
     return () => {
       disposed = true;
       controller.abort();
@@ -388,8 +418,9 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
               <p className="empty-copy">Loading Agents…</p>
             ) : agents.length === 0 ? (
               <p className="empty-copy">
-                No Agents are registered yet. Register the Windows Agent before adding
-                a server.
+                {agentPage === 1
+                  ? "No Agents are registered yet. Register the Windows Agent before adding a server."
+                  : "No Agents are on this page. Return to the previous page to review your registered Agents."}
               </p>
             ) : (
               <div className="agent-list">
@@ -405,6 +436,12 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
                 ))}
               </div>
             )}
+            <ListPagination
+              page={agentPage}
+              hasNext={agents.length === LIST_PAGE_SIZE}
+              itemLabel="Agents"
+              onPageChange={setAgentPage}
+            />
           </section>
 
           <section className="dashboard-panel server-panel" aria-labelledby="servers-title">
@@ -419,7 +456,9 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
               <p className="empty-copy">Loading servers…</p>
             ) : servers.length === 0 ? (
               <p className="empty-copy">
-                No ServerInstances yet. Add one after an Agent is registered.
+                {serverPage === 1
+                  ? "No ServerInstances yet. Add one after an Agent is registered."
+                  : "No ServerInstances are on this page. Return to the previous page to review your servers."}
               </p>
             ) : (
               <div className="server-list">
@@ -445,6 +484,12 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
                 ))}
               </div>
             )}
+            <ListPagination
+              page={serverPage}
+              hasNext={servers.length === LIST_PAGE_SIZE}
+              itemLabel="ServerInstances"
+              onPageChange={setServerPage}
+            />
           </section>
 
           <section className="dashboard-panel detail-panel" aria-labelledby="server-detail-title">
@@ -580,5 +625,43 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
         </div>
       </main>
     </div>
+  );
+}
+
+interface ListPaginationProps {
+  page: number;
+  hasNext: boolean;
+  itemLabel: string;
+  onPageChange: (page: number) => void;
+}
+
+function ListPagination({
+  page,
+  hasNext,
+  itemLabel,
+  onPageChange,
+}: ListPaginationProps) {
+  return (
+    <nav className="list-pagination" aria-label={`${itemLabel} pagination`}>
+      <span>Page {page} · up to {LIST_PAGE_SIZE} {itemLabel}</span>
+      <div>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={page === 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          Previous
+        </button>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={!hasNext}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Next
+        </button>
+      </div>
+    </nav>
   );
 }

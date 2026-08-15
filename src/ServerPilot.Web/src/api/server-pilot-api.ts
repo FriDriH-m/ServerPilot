@@ -90,9 +90,14 @@ export interface ServerCommandHistoryPage {
 export type ServerCommandAction = "start" | "stop";
 
 export interface ManagementApi {
-  listAgents(accessToken: string, signal?: AbortSignal): Promise<AgentSummary[]>;
+  listAgents(
+    accessToken: string,
+    page: number,
+    signal?: AbortSignal,
+  ): Promise<AgentSummary[]>;
   listServerInstances(
     accessToken: string,
+    page: number,
     signal?: AbortSignal,
   ): Promise<ServerInstanceSummary[]>;
   getServerInstance(
@@ -159,8 +164,12 @@ export class ServerPilotApi implements AuthenticationApi, ManagementApi {
     });
   }
 
-  listAgents(accessToken: string, signal?: AbortSignal): Promise<AgentSummary[]> {
-    return this.send<AgentSummary[]>("/agents?limit=100&page=1", {
+  listAgents(
+    accessToken: string,
+    page = 1,
+    signal?: AbortSignal,
+  ): Promise<AgentSummary[]> {
+    return this.send<AgentSummary[]>(`/agents?limit=100&page=${page}`, {
       accessToken,
       signal,
     });
@@ -168,10 +177,11 @@ export class ServerPilotApi implements AuthenticationApi, ManagementApi {
 
   listServerInstances(
     accessToken: string,
+    page = 1,
     signal?: AbortSignal,
   ): Promise<ServerInstanceSummary[]> {
     return this.send<ServerInstanceSummary[]>(
-      "/server-instances?limit=100&page=1",
+      `/server-instances?limit=100&page=${page}`,
       { accessToken, signal },
     );
   }
