@@ -55,6 +55,7 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
             .Select(serverInstance => new ServerInstanceListItem(
                 serverInstance.Id,
                 serverInstance.AgentId,
+                serverInstance.Profile,
                 serverInstance.Name,
                 serverInstance.Status,
                 serverInstance.Status,
@@ -114,6 +115,11 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
             !string.Equals(
                 serverInstance.ProcessName,
                 configuration.ProcessName,
+                StringComparison.Ordinal) ||
+            serverInstance.Profile != configuration.Profile ||
+            !string.Equals(
+                serverInstance.DataDirectory,
+                configuration.DataDirectory,
                 StringComparison.Ordinal);
         if (processConfigurationChanged &&
             (serverInstance.IsActive || await dbContext.ServerCommands
@@ -204,10 +210,12 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
             .Take(limit)
             .Select(serverInstance => new AssignedServerInstanceDetails(
                 serverInstance.Id,
+                serverInstance.Profile,
                 serverInstance.ExecutablePath,
                 serverInstance.Arguments,
                 serverInstance.WorkingDirectory,
                 serverInstance.ProcessName,
+                serverInstance.DataDirectory,
                 serverInstance.Status,
                 serverInstance.LastProcessId,
                 serverInstance.LastProcessStartedAt,
@@ -338,11 +346,13 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
         query.Select(serverInstance => new ServerInstanceDetails(
             serverInstance.Id,
             serverInstance.AgentId,
+            serverInstance.Profile,
             serverInstance.Name,
             serverInstance.ExecutablePath,
             serverInstance.Arguments,
             serverInstance.WorkingDirectory,
             serverInstance.ProcessName,
+            serverInstance.DataDirectory,
             serverInstance.Status,
             serverInstance.Status,
             serverInstance.LastProcessId,
@@ -362,11 +372,13 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
         new(
             serverInstance.Id,
             serverInstance.AgentId,
+            serverInstance.Profile,
             serverInstance.Name,
             serverInstance.ExecutablePath,
             serverInstance.Arguments,
             serverInstance.WorkingDirectory,
             serverInstance.ProcessName,
+            serverInstance.DataDirectory,
             serverInstance.Status,
             serverInstance.Status,
             serverInstance.LastProcessId,

@@ -32,6 +32,7 @@ const agent: AgentSummary = {
 const server: ServerInstanceDetails = {
   id: "server-1",
   agentId: agent.id,
+  profile: "Generic",
   name: "Project Zomboid",
   status: "Running",
   reportedStatus: "Running",
@@ -45,6 +46,8 @@ const server: ServerInstanceDetails = {
   arguments: "-port 16261",
   workingDirectory: "C:\\Servers\\Zomboid",
   processName: "server",
+  dataDirectory: null,
+  projectZomboidPaths: null,
 };
 
 function createSession(): AuthenticationSession {
@@ -242,6 +245,57 @@ describe("management dashboard", () => {
       expect.objectContaining({ agentId: agent.id, name: "Project Zomboid" }),
     );
     expect(await screen.findByText("Project Zomboid was created.")).toBeInTheDocument();
+  });
+
+  it("submits the bounded Project Zomboid profile fields", async () => {
+    const created: ServerInstanceDetails = {
+      ...server,
+      profile: "ProjectZomboid",
+      executablePath: "C:\\Servers\\ProjectZomboid\\StartServer64.bat",
+      arguments: "",
+      workingDirectory: "C:\\Servers\\ProjectZomboid",
+      processName: "java",
+      dataDirectory: "C:\\ServerPilotData\\ProjectZomboid",
+    };
+    const createServerInstance = vi.fn().mockResolvedValue(created);
+    const api = createManagementApi({
+      listServerInstances: vi.fn().mockResolvedValue([]),
+      createServerInstance,
+    });
+
+    await renderAuthenticated(api);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Add server" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Add server" }));
+    fireEvent.change(screen.getByLabelText("Agent"), {
+      target: { value: agent.id },
+    });
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Project Zomboid" },
+    });
+    fireEvent.change(screen.getByLabelText("Profile"), {
+      target: { value: "ProjectZomboid" },
+    });
+    fireEvent.change(screen.getByLabelText("Executable path"), {
+      target: { value: created.executablePath },
+    });
+    fireEvent.change(screen.getByLabelText("Project Zomboid data directory"), {
+      target: { value: created.dataDirectory },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create server" }));
+
+    await waitFor(() => expect(createServerInstance).toHaveBeenCalledOnce());
+    expect(createServerInstance).toHaveBeenCalledWith("access-token", {
+      agentId: agent.id,
+      profile: "ProjectZomboid",
+      name: "Project Zomboid",
+      executablePath: created.executablePath,
+      arguments: "",
+      workingDirectory: "",
+      processName: "java",
+      dataDirectory: created.dataDirectory,
+    });
   });
 
   it("schedules non-overlapping refreshes within the default API rate-limit budget", async () => {

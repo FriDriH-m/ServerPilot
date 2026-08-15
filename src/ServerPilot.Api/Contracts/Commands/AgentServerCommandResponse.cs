@@ -17,7 +17,9 @@ public sealed record AgentServerCommandResponse(
     AgentServerInstanceConfigurationResponse ServerInstance);
 
 public sealed record AgentServerInstanceConfigurationResponse(
+    string Profile,
     string ExecutablePath,
     string Arguments,
     string WorkingDirectory,
-    string ProcessName);
+    string ProcessName,
+    string? DataDirectory);

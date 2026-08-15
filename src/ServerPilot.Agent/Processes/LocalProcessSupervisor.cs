@@ -80,10 +80,31 @@ public sealed class LocalProcessSupervisor : IProcessSupervisor, IDisposable
                 return Failed(ProcessSupervisorFailure.WorkingDirectoryNotFound);
             }
 
-            ProcessLaunchResult launch = _platform.Launch(_configuration);
+            if (!_platform.FileExists(_configuration.ManagedExecutablePath))
+            {
+                return Failed(ProcessSupervisorFailure.ManagedExecutableNotFound);
+            }
+
+            if (_configuration.Profile == LocalServerProfile.ProjectZomboid &&
+                !_platform.DirectoryExists(_configuration.DataDirectory!))
+            {
+                return Failed(ProcessSupervisorFailure.DataDirectoryNotFound);
+            }
+
+            if (_configuration.ProjectZomboidConfigurationPath is not null &&
+                !_platform.FileExists(_configuration.ProjectZomboidConfigurationPath))
+            {
+                return Failed(ProcessSupervisorFailure.ProfileConfigurationNotFound);
+            }
+
+            ProcessLaunchResult launch = await _platform.LaunchAsync(
+                _configuration,
+                cancellationToken);
             if (launch.Status != ProcessPlatformStatus.Succeeded || launch.Identity is null)
             {
-                return Failed(MapFailure(launch.Status, ProcessSupervisorFailure.StartFailed));
+                return Failed(launch.Status == ProcessPlatformStatus.InvalidConfiguration
+                    ? ProcessSupervisorFailure.InvalidLauncher
+                    : MapFailure(launch.Status, ProcessSupervisorFailure.StartFailed));
             }
 
             _trackedIdentity = launch.Identity;
@@ -132,7 +153,9 @@ public sealed class LocalProcessSupervisor : IProcessSupervisor, IDisposable
                 return inspection;
             }
 
-            ProcessSignalResult gracefulSignal = _platform.RequestGracefulStop(identity);
+            ProcessSignalResult gracefulSignal = await _platform.RequestGracefulStopAsync(
+                identity,
+                cancellationToken);
             if (gracefulSignal.Status == ProcessPlatformStatus.Succeeded)
             {
                 ProcessWaitResult gracefulWait = await _platform.WaitForExitAsync(
@@ -245,7 +268,7 @@ public sealed class LocalProcessSupervisor : IProcessSupervisor, IDisposable
         }
 
         ProcessIdentity identity = _trackedIdentity;
-        ProcessLookupResult lookup = _platform.Lookup(identity.ProcessId);
+        ProcessLookupResult lookup = _platform.Lookup(identity);
         if (lookup.Status is ProcessPlatformStatus.NotFound or ProcessPlatformStatus.Exited)
         {
             _trackedIdentity = null;

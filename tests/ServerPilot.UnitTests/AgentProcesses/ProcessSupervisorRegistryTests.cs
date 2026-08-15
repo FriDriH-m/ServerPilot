@@ -70,10 +70,12 @@ public sealed class ProcessSupervisorRegistryTests
     }
 
     private static ProcessSupervisorRequest CreateRequest() => new(
+        "Generic",
         @"C:\Servers\server.exe",
         "--port 16261",
         @"C:\Servers",
-        "server");
+        "server",
+        null);
 
     private sealed class IdentityProcessPlatform(ProcessSnapshot snapshot) : IProcessPlatform
     {
@@ -81,14 +83,18 @@ public sealed class ProcessSupervisorRegistryTests
 
         public bool DirectoryExists(string path) => true;
 
-        public ProcessLaunchResult Launch(LocalProcessConfiguration configuration) =>
-            new(ProcessPlatformStatus.Failed);
+        public Task<ProcessLaunchResult> LaunchAsync(
+            LocalProcessConfiguration configuration,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new ProcessLaunchResult(ProcessPlatformStatus.Failed));
 
-        public ProcessLookupResult Lookup(int processId) =>
+        public ProcessLookupResult Lookup(ProcessIdentity identity) =>
             new(ProcessPlatformStatus.Succeeded, snapshot);
 
-        public ProcessSignalResult RequestGracefulStop(ProcessIdentity identity) =>
-            new(ProcessPlatformStatus.NotSupported);
+        public Task<ProcessSignalResult> RequestGracefulStopAsync(
+            ProcessIdentity identity,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new ProcessSignalResult(ProcessPlatformStatus.NotSupported));
 
         public ProcessSignalResult ForceStop(ProcessIdentity identity) =>
             new(ProcessPlatformStatus.Failed);

@@ -266,11 +266,13 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
       let saved: ServerInstanceDetails;
       if (formMode === "edit" && selectedServer) {
         const update: UpdateServerInstanceRequest = {
+          profile: request.profile,
           name: request.name,
           executablePath: request.executablePath,
           arguments: request.arguments,
           workingDirectory: request.workingDirectory,
           processName: request.processName,
+          dataDirectory: request.dataDirectory,
         };
         saved = await api.updateServerInstance(
           accessToken,
@@ -551,6 +553,10 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
                     <dd>{selectedAgent?.name ?? "Unknown Agent"}</dd>
                   </div>
                   <div>
+                    <dt>Profile</dt>
+                    <dd>{selectedServer.profile}</dd>
+                  </div>
+                  <div>
                     <dt>Process</dt>
                     <dd>{selectedServer.processName}</dd>
                   </div>
@@ -568,6 +574,28 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
                       {selectedServer.executablePath}
                     </dd>
                   </div>
+                  {selectedServer.projectZomboidPaths ? (
+                    <>
+                      <div className="wide-fact">
+                        <dt>Configuration</dt>
+                        <dd title={selectedServer.projectZomboidPaths.mainConfigurationPath}>
+                          {selectedServer.projectZomboidPaths.mainConfigurationPath}
+                        </dd>
+                      </div>
+                      <div className="wide-fact">
+                        <dt>Console log</dt>
+                        <dd title={selectedServer.projectZomboidPaths.consoleLogPath}>
+                          {selectedServer.projectZomboidPaths.consoleLogPath}
+                        </dd>
+                      </div>
+                      <div className="wide-fact">
+                        <dt>Save directory</dt>
+                        <dd title={selectedServer.projectZomboidPaths.saveDirectory}>
+                          {selectedServer.projectZomboidPaths.saveDirectory}
+                        </dd>
+                      </div>
+                    </>
+                  ) : null}
                 </dl>
 
                 <div className="command-actions">

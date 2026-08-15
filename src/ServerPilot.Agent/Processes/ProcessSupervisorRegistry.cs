@@ -10,10 +10,12 @@ public interface IProcessSupervisorRegistry
 }
 
 public sealed record ProcessSupervisorRequest(
+    string Profile,
     string ExecutablePath,
     string Arguments,
     string WorkingDirectory,
     string ProcessName,
+    string? DataDirectory,
     ProcessIdentity? TrackedIdentity = null);
 
 public enum ProcessSupervisorResolutionFailure
@@ -47,10 +49,12 @@ public sealed class LocalProcessSupervisorRegistry(
         ProcessSupervisorRequest request)
     {
         LocalProcessConfigurationResult configurationResult = LocalProcessConfiguration.Create(
+            request.Profile,
             request.ExecutablePath,
             request.Arguments,
             request.WorkingDirectory,
-            request.ProcessName);
+            request.ProcessName,
+            request.DataDirectory);
         if (!configurationResult.IsValid || configurationResult.Configuration is null)
         {
             return ProcessSupervisorResolution.Failed(
@@ -73,6 +77,9 @@ public sealed class LocalProcessSupervisorRegistry(
                 configuration,
                 platform,
                 loggerFactory.CreateLogger<LocalProcessSupervisor>(),
+                timeouts: configuration.Profile == LocalServerProfile.ProjectZomboid
+                    ? ProcessStopTimeouts.ProjectZomboid
+                    : null,
                 trackedIdentity: request.TrackedIdentity);
             entries.Add(serverInstanceId, new RegistryEntry(configuration, supervisor));
             return ProcessSupervisorResolution.Succeeded(supervisor);

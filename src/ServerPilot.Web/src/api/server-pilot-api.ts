@@ -32,9 +32,12 @@ export interface AgentSummary {
   status: string;
 }
 
+export type ServerInstanceProfile = "Generic" | "ProjectZomboid";
+
 export interface ServerInstanceSummary {
   id: string;
   agentId: string;
+  profile: ServerInstanceProfile;
   name: string;
   status: string;
   reportedStatus: string;
@@ -51,15 +54,30 @@ export interface ServerInstanceDetails extends ServerInstanceSummary {
   arguments: string;
   workingDirectory: string;
   processName: string;
+  dataDirectory: string | null;
+  projectZomboidPaths: ProjectZomboidPaths | null;
+}
+
+export interface ProjectZomboidPaths {
+  configurationDirectory: string;
+  mainConfigurationPath: string;
+  sandboxConfigurationPath: string;
+  spawnPointsPath: string;
+  spawnRegionsPath: string;
+  logsDirectory: string;
+  consoleLogPath: string;
+  saveDirectory: string;
 }
 
 export interface CreateServerInstanceRequest {
   agentId: string;
+  profile: ServerInstanceProfile;
   name: string;
   executablePath: string;
   arguments: string;
   workingDirectory: string;
   processName: string;
+  dataDirectory: string | null;
 }
 
 export type UpdateServerInstanceRequest = Omit<

@@ -15,7 +15,9 @@ public enum AgentCommandType
 }
 
 public sealed record ClaimedAgentServerInstance(
+    string Profile,
     string ExecutablePath,
     string Arguments,
     string WorkingDirectory,
-    string ProcessName);
+    string ProcessName,
+    string? DataDirectory);

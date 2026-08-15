@@ -55,10 +55,12 @@ public sealed class AgentServerInstancesController(
             cancellationToken);
         return Ok(items.Select(item => new AgentServerInstanceResponse(
             item.Id,
+            item.Profile.ToString(),
             item.ExecutablePath,
             item.Arguments,
             item.WorkingDirectory,
             item.ProcessName,
+            item.DataDirectory,
             item.ReportedStatus.ToString(),
             item.LastProcessId,
             item.LastProcessStartedAt,

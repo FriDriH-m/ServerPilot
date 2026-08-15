@@ -129,10 +129,12 @@ public sealed class AgentCommandExecutor(
         ProcessSupervisorResolution resolution = supervisors.Resolve(
             command.ServerInstanceId,
             new ProcessSupervisorRequest(
+                command.ServerInstance.Profile,
                 command.ServerInstance.ExecutablePath,
                 command.ServerInstance.Arguments,
                 command.ServerInstance.WorkingDirectory,
-                command.ServerInstance.ProcessName));
+                command.ServerInstance.ProcessName,
+                command.ServerInstance.DataDirectory));
         if (resolution.Supervisor is null)
         {
             return resolution.Failure switch

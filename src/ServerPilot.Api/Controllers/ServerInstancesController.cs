@@ -76,11 +76,13 @@ public sealed class ServerInstancesController(
         }
 
         if (request.AgentId == Guid.Empty || !TryCreateConfiguration(
+                request.Profile,
                 request.Name,
                 request.ExecutablePath,
                 request.Arguments,
                 request.WorkingDirectory,
                 request.ProcessName,
+                request.DataDirectory,
                 out ServerInstanceConfiguration? configuration))
         {
             return InvalidConfiguration();
@@ -161,11 +163,13 @@ public sealed class ServerInstancesController(
         }
 
         if (!TryCreateConfiguration(
+                request.Profile,
                 request.Name,
                 request.ExecutablePath,
                 request.Arguments,
                 request.WorkingDirectory,
                 request.ProcessName,
+                request.DataDirectory,
                 out ServerInstanceConfiguration? configuration))
         {
             return InvalidConfiguration();
@@ -245,31 +249,61 @@ public sealed class ServerInstancesController(
     }
 
     private static bool TryCreateConfiguration(
+        string? profileValue,
         string? name,
         string? executablePath,
         string? arguments,
         string? workingDirectory,
         string? processName,
-        out ServerInstanceConfiguration? configuration) =>
-        ServerInstanceConfiguration.TryCreate(
+        string? dataDirectory,
+        out ServerInstanceConfiguration? configuration)
+    {
+        configuration = null;
+        ServerInstanceProfile profile = ServerInstanceProfile.Generic;
+        if (!string.IsNullOrWhiteSpace(profileValue) &&
+            (!Enum.TryParse(profileValue.Trim(), ignoreCase: false, out profile) ||
+             !Enum.IsDefined(profile)))
+        {
+            return false;
+        }
+
+        string? normalizedWorkingDirectory = workingDirectory;
+        string? normalizedProcessName = processName;
+        string? normalizedArguments = arguments;
+        if (profile == ServerInstanceProfile.ProjectZomboid)
+        {
+            normalizedArguments ??= string.Empty;
+            normalizedProcessName = string.IsNullOrWhiteSpace(normalizedProcessName)
+                ? "java"
+                : normalizedProcessName;
+            normalizedWorkingDirectory = string.IsNullOrWhiteSpace(normalizedWorkingDirectory)
+                ? WindowsPathSyntax.GetDirectoryName(executablePath?.Trim() ?? string.Empty)
+                : normalizedWorkingDirectory;
+        }
+
+        return ServerInstanceConfiguration.TryCreate(
+            profile,
             name,
             executablePath,
-            arguments,
-            workingDirectory,
-            processName,
+            normalizedArguments,
+            normalizedWorkingDirectory,
+            normalizedProcessName,
+            dataDirectory,
             out configuration);
+    }
 
     private ObjectResult InvalidConfiguration() =>
         Problem(
             statusCode: StatusCodes.Status400BadRequest,
             title: "Invalid ServerInstance configuration",
-            detail: "Use non-empty values, absolute Windows or UNC paths, and a process name without a path.");
+            detail: "Use a valid profile and safe absolute Windows or UNC paths. ProjectZomboid requires StartServer64.bat, its containing working directory, process name java, no custom arguments and an explicit data directory.");
 
     private static ServerInstanceListResponse ToListResponse(
         ServerInstanceListItem serverInstance) =>
         new(
             serverInstance.Id,
             serverInstance.AgentId,
+            serverInstance.Profile.ToString(),
             serverInstance.Name,
             serverInstance.Status.ToString(),
             serverInstance.ReportedStatus.ToString(),
@@ -284,11 +318,14 @@ public sealed class ServerInstancesController(
         new(
             serverInstance.Id,
             serverInstance.AgentId,
+            serverInstance.Profile.ToString(),
             serverInstance.Name,
             serverInstance.ExecutablePath,
             serverInstance.Arguments,
             serverInstance.WorkingDirectory,
             serverInstance.ProcessName,
+            serverInstance.DataDirectory,
+            ToProjectZomboidPaths(serverInstance),
             serverInstance.Status.ToString(),
             serverInstance.ReportedStatus.ToString(),
             serverInstance.LastProcessId,
@@ -297,4 +334,26 @@ public sealed class ServerInstancesController(
             serverInstance.IsStateStale,
             serverInstance.CreatedAt,
             serverInstance.UpdatedAt);
+
+    private static ProjectZomboidPathsResponse? ToProjectZomboidPaths(
+        ServerInstanceDetails serverInstance)
+    {
+        if (serverInstance.Profile != ServerInstanceProfile.ProjectZomboid ||
+            serverInstance.DataDirectory is null)
+        {
+            return null;
+        }
+
+        ProjectZomboidServerPaths paths = ProjectZomboidServerPaths.Create(
+            serverInstance.DataDirectory);
+        return new ProjectZomboidPathsResponse(
+            paths.ConfigurationDirectory,
+            paths.MainConfigurationPath,
+            paths.SandboxConfigurationPath,
+            paths.SpawnPointsPath,
+            paths.SpawnRegionsPath,
+            paths.LogsDirectory,
+            paths.ConsoleLogPath,
+            paths.SaveDirectory);
+    }
 }

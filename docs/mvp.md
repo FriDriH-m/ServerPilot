@@ -18,6 +18,10 @@ MVP должен подтвердить работу всей основной �
 
 В MVP не требуется полноценная поддержка Project Zomboid. Сначала Agent должен уметь управлять простым тестовым процессом.
 
+Post-MVP issue #38 subsequently adds the bounded Project Zomboid profile described in
+[`project-zomboid-server.md`](project-zomboid-server.md). This does not expand the historical
+MVP scope or permit generic batch/script execution.
+
 ## Основной пользовательский сценарий
 
 1. Пользователь создаёт учётную запись.

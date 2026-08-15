@@ -51,6 +51,7 @@ public sealed class HttpAgentApiClientTests
                     DeliveryKind = "New",
                     ServerInstance = new
                     {
+                        Profile = "Generic",
                         ExecutablePath = @"C:\Servers\server.exe",
                         Arguments = "--port 16261",
                         WorkingDirectory = @"C:\Servers",
@@ -89,6 +90,7 @@ public sealed class HttpAgentApiClientTests
                     DeliveryKind = "New",
                     ServerInstance = new
                     {
+                        Profile = "Generic",
                         ExecutablePath = @"C:\Servers\server.exe",
                         Arguments = string.Empty,
                         WorkingDirectory = @"C:\Servers",
@@ -144,6 +146,7 @@ public sealed class HttpAgentApiClientTests
                     new
                     {
                         Id = serverInstanceId,
+                        Profile = "Generic",
                         ExecutablePath = @"C:\Servers\server.exe",
                         Arguments = string.Empty,
                         WorkingDirectory = @"C:\Servers",
@@ -167,6 +170,45 @@ public sealed class HttpAgentApiClientTests
             startedAt,
             @"C:\Servers\server.exe",
             "server"), instance.Identity);
+    }
+
+    [Fact]
+    public async Task ReconstructsProjectZomboidIdentityFromTheBundledJavaProcess()
+    {
+        AgentCredential credential = CreateCredential();
+        Guid serverInstanceId = Guid.NewGuid();
+        DateTimeOffset startedAt = new(2026, 8, 16, 12, 0, 0, TimeSpan.Zero);
+        StubHttpMessageHandler handler = new(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new[]
+                {
+                    new
+                    {
+                        Id = serverInstanceId,
+                        Profile = "ProjectZomboid",
+                        ExecutablePath = @"C:\Servers\ProjectZomboid\StartServer64.bat",
+                        Arguments = string.Empty,
+                        WorkingDirectory = @"C:\Servers\ProjectZomboid",
+                        ProcessName = "java",
+                        DataDirectory = @"C:\ServerPilotData\ProjectZomboid",
+                        ReportedStatus = "Running",
+                        LastProcessId = 42,
+                        LastProcessStartedAt = startedAt,
+                        LastStatusReportedAt = startedAt.AddSeconds(1),
+                    },
+                }),
+            });
+        HttpAgentApiClient client = CreateClient(handler);
+
+        AssignedAgentServerInstance instance = Assert.Single(
+            await client.ListServerInstancesAsync(credential, CancellationToken.None));
+
+        Assert.Equal("ProjectZomboid", instance.Profile);
+        Assert.Equal(LocalServerProfile.ProjectZomboid, instance.Identity?.Profile);
+        Assert.Equal(
+            @"C:\Servers\ProjectZomboid\jre64\bin\java.exe",
+            instance.Identity?.ExecutablePath);
     }
 
     [Fact]
@@ -242,10 +284,12 @@ public sealed class HttpAgentApiClientTests
         Guid.NewGuid(),
         "New",
         new ClaimedAgentServerInstance(
+            "Generic",
             @"C:\Servers\server.exe",
             string.Empty,
             @"C:\Servers",
-            "server"));
+            "server",
+            null));
 
     private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
         : HttpMessageHandler

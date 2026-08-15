@@ -75,10 +75,12 @@ public sealed class AgentProcessStateReconcilerTests
     private static AssignedAgentServerInstance CreateAssignment(
         AgentServerInstanceStatus status) => new(
             Guid.NewGuid(),
+            "Generic",
             Identity.ExecutablePath,
             string.Empty,
             @"C:\Servers",
             Identity.ProcessName,
+            null,
             status,
             status == AgentServerInstanceStatus.Running ? Identity : null,
             DateTimeOffset.UtcNow);

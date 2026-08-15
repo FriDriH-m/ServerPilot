@@ -8,6 +8,7 @@ import { getCommandAvailability } from "./dashboard-model";
 const server: ServerInstanceDetails = {
   id: "server-1",
   agentId: "agent-1",
+  profile: "Generic",
   name: "Game server",
   status: "Stopped",
   reportedStatus: "Stopped",
@@ -21,6 +22,8 @@ const server: ServerInstanceDetails = {
   arguments: "",
   workingDirectory: "C:\\Servers\\Game",
   processName: "server",
+  dataDirectory: null,
+  projectZomboidPaths: null,
 };
 
 const activeCommand: ServerCommand = {

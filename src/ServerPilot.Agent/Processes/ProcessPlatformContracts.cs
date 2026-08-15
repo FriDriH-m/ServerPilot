@@ -6,11 +6,15 @@ public interface IProcessPlatform
 
     bool DirectoryExists(string path);
 
-    ProcessLaunchResult Launch(LocalProcessConfiguration configuration);
+    Task<ProcessLaunchResult> LaunchAsync(
+        LocalProcessConfiguration configuration,
+        CancellationToken cancellationToken);
 
-    ProcessLookupResult Lookup(int processId);
+    ProcessLookupResult Lookup(ProcessIdentity identity);
 
-    ProcessSignalResult RequestGracefulStop(ProcessIdentity identity);
+    Task<ProcessSignalResult> RequestGracefulStopAsync(
+        ProcessIdentity identity,
+        CancellationToken cancellationToken);
 
     ProcessSignalResult ForceStop(ProcessIdentity identity);
 
@@ -26,6 +30,7 @@ public enum ProcessPlatformStatus
     NotFound,
     Exited,
     IdentityMismatch,
+    InvalidConfiguration,
     NotSupported,
     AccessDenied,
     TimedOut,
