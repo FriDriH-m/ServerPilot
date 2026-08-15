@@ -30,6 +30,7 @@ type FormMode = "create" | "edit" | null;
 
 const overviewRefreshIntervalMilliseconds = 15_000;
 const detailRefreshIntervalMilliseconds = 10_000;
+const listPageSize = 100;
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
@@ -52,6 +53,8 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
   const { session, logout } = useAuth();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [servers, setServers] = useState<ServerInstanceSummary[]>([]);
+  const [agentPage, setAgentPage] = useState(1);
+  const [serverPage, setServerPage] = useState(1);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
   const [selectedServer, setSelectedServer] =
     useState<ServerInstanceDetails | null>(null);
@@ -81,8 +84,8 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
       }
       try {
         const [agentItems, serverItems] = await Promise.all([
-          api.listAgents(accessToken, signal),
-          api.listServerInstances(accessToken, signal),
+          api.listAgents(accessToken, agentPage, signal),
+          api.listServerInstances(accessToken, serverPage, signal),
         ]);
         if (signal?.aborted) {
           return;
@@ -106,7 +109,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
         }
       }
     },
-    [accessToken, api],
+    [accessToken, agentPage, api, serverPage],
   );
 
   useEffect(() => {
@@ -440,8 +443,9 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
               <p className="empty-copy">Loading Agents…</p>
             ) : agents.length === 0 ? (
               <p className="empty-copy">
-                No Agents are registered yet. Register the Windows Agent before adding
-                a server.
+                {agentPage === 1
+                  ? "No Agents are registered yet. Register the Windows Agent before adding a server."
+                  : "No Agents are on this page. Return to the previous page to review your registered Agents."}
               </p>
             ) : (
               <div className="agent-list">
@@ -457,6 +461,12 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
                 ))}
               </div>
             )}
+            <ListPagination
+              page={agentPage}
+              hasNext={agents.length === listPageSize}
+              itemLabel="Agents"
+              onPageChange={setAgentPage}
+            />
           </section>
 
           <section className="dashboard-panel server-panel" aria-labelledby="servers-title">
@@ -471,7 +481,9 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
               <p className="empty-copy">Loading servers…</p>
             ) : servers.length === 0 ? (
               <p className="empty-copy">
-                No ServerInstances yet. Add one after an Agent is registered.
+                {serverPage === 1
+                  ? "No ServerInstances yet. Add one after an Agent is registered."
+                  : "No ServerInstances are on this page. Return to the previous page to review your servers."}
               </p>
             ) : (
               <div className="server-list">
@@ -497,6 +509,12 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
                 ))}
               </div>
             )}
+            <ListPagination
+              page={serverPage}
+              hasNext={servers.length === listPageSize}
+              itemLabel="ServerInstances"
+              onPageChange={setServerPage}
+            />
           </section>
 
           <section className="dashboard-panel detail-panel" aria-labelledby="server-detail-title">
@@ -632,5 +650,43 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
         </div>
       </main>
     </div>
+  );
+}
+
+interface ListPaginationProps {
+  page: number;
+  hasNext: boolean;
+  itemLabel: string;
+  onPageChange: (page: number) => void;
+}
+
+function ListPagination({
+  page,
+  hasNext,
+  itemLabel,
+  onPageChange,
+}: ListPaginationProps) {
+  return (
+    <nav className="list-pagination" aria-label={`${itemLabel} pagination`}>
+      <span>Page {page} · up to {listPageSize} {itemLabel}</span>
+      <div>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={page === 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          Previous
+        </button>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={!hasNext}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Next
+        </button>
+      </div>
+    </nav>
   );
 }

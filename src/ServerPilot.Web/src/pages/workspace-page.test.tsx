@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   AgentSummary,
@@ -65,6 +72,26 @@ function createManagementApi(
   };
 }
 
+function createDeferred<T>() {
+  let resolve: (value: T) => void;
+  const promise = new Promise<T>((completion) => {
+    resolve = completion;
+  });
+
+  return { promise, resolve: resolve! };
+}
+
+function createServerPage(start: number): ServerInstanceDetails[] {
+  return Array.from({ length: 100 }, (_, index) => {
+    const number = start + index;
+    return {
+      ...server,
+      id: `server-${number}`,
+      name: `Server ${number}`,
+    };
+  });
+}
+
 async function renderAuthenticated(api: ManagementApi) {
   const authenticationApi: AuthenticationApi = {
     login: vi.fn().mockResolvedValue(createSession()),
@@ -85,6 +112,32 @@ async function renderAuthenticated(api: ManagementApi) {
   });
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   await screen.findByRole("heading", { name: "Operate from backend truth." });
+}
+
+async function renderAuthenticatedWithFakeTimers(api: ManagementApi) {
+  const authenticationApi: AuthenticationApi = {
+    login: vi.fn().mockResolvedValue(createSession()),
+    register: vi.fn(),
+  };
+  window.history.replaceState(null, "", "/app");
+  render(
+    <AuthProvider api={authenticationApi}>
+      <AppRoutes managementApi={api} />
+    </AuthProvider>,
+  );
+
+  fireEvent.change(screen.getByLabelText("Email"), {
+    target: { value: "owner@example.test" },
+  });
+  fireEvent.change(screen.getByLabelText("Password"), {
+    target: { value: "not-a-real-password" },
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  await act(async () => {});
 }
 
 describe("management dashboard", () => {
@@ -215,6 +268,103 @@ describe("management dashboard", () => {
     } finally {
       setIntervalSpy.mockRestore();
       setTimeoutSpy.mockRestore();
+    }
+  });
+
+  it("keeps background dashboard refreshes within the authenticated-user limit", async () => {
+    vi.useFakeTimers();
+    try {
+      const listAgents = vi.fn().mockResolvedValue([agent]);
+      const listServerInstances = vi.fn().mockResolvedValue([server]);
+      const getServerInstance = vi.fn().mockResolvedValue(server);
+      const listServerCommands = vi
+        .fn()
+        .mockResolvedValue({ items: [], nextCursor: null });
+      const api = createManagementApi({
+        listAgents,
+        listServerInstances,
+        getServerInstance,
+        listServerCommands,
+      });
+
+      await renderAuthenticatedWithFakeTimers(api);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+
+      expect(listAgents).toHaveBeenCalledTimes(5);
+      expect(listServerInstances).toHaveBeenCalledTimes(5);
+      expect(getServerInstance).toHaveBeenCalledTimes(7);
+      expect(listServerCommands).toHaveBeenCalledTimes(7);
+      expect(
+        listAgents.mock.calls.length +
+          listServerInstances.mock.calls.length +
+          getServerInstance.mock.calls.length +
+          listServerCommands.mock.calls.length,
+      ).toBeLessThanOrEqual(30);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("loads a later server page and ignores an older page response", async () => {
+    const firstPage = createServerPage(1);
+    const secondPage = [{ ...server, id: "server-101", name: "Server 101" }];
+    const stalePage = createDeferred<ServerInstanceDetails[]>();
+    const nextPage = createDeferred<ServerInstanceDetails[]>();
+    let firstPageRequestCount = 0;
+    let staleRequestSignal: AbortSignal | undefined;
+    const listServerInstances = vi.fn(
+      (_accessToken: string, page: number, signal?: AbortSignal) => {
+        if (page === 2) {
+          return nextPage.promise;
+        }
+
+        firstPageRequestCount += 1;
+        if (firstPageRequestCount === 1) {
+          return Promise.resolve(firstPage);
+        }
+
+        staleRequestSignal = signal;
+        return stalePage.promise;
+      },
+    );
+    const api = createManagementApi({ listServerInstances });
+
+    vi.useFakeTimers();
+    try {
+      await renderAuthenticatedWithFakeTimers(api);
+      expect(screen.getByText("Server 1")).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(listServerInstances).toHaveBeenCalledTimes(2);
+
+      fireEvent.click(
+        within(
+          screen.getByRole("navigation", { name: "ServerInstances pagination" }),
+        ).getByRole("button", { name: "Next" }),
+      );
+      await act(async () => {});
+      expect(listServerInstances).toHaveBeenCalledTimes(3);
+
+      await act(async () => {
+        nextPage.resolve(secondPage);
+        await nextPage.promise;
+      });
+      expect(screen.getByText("Server 101")).toBeInTheDocument();
+
+      await act(async () => {
+        stalePage.resolve(firstPage);
+        await stalePage.promise;
+      });
+
+      expect(staleRequestSignal?.aborted).toBe(true);
+      expect(screen.getByText("Server 101")).toBeInTheDocument();
+      expect(screen.queryByText("Server 1")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

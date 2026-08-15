@@ -88,15 +88,26 @@ describe("ServerPilotApi", () => {
   });
 
   it("uses bearer authentication for management reads", async () => {
-    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json([]),
-    );
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockImplementation(() => Promise.resolve(Response.json([])));
     const api = new ServerPilotApi("/api", fetchImplementation);
 
-    await api.listAgents("access-token");
+    await api.listAgents("access-token", 2);
+    await api.listServerInstances("access-token", 3);
 
-    expect(fetchImplementation).toHaveBeenCalledWith(
-      "/api/agents?limit=100&page=1",
+    expect(fetchImplementation).toHaveBeenNthCalledWith(
+      1,
+      "/api/agents?limit=100&page=2",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({ Authorization: "Bearer access-token" }),
+        credentials: "omit",
+      }),
+    );
+    expect(fetchImplementation).toHaveBeenNthCalledWith(
+      2,
+      "/api/server-instances?limit=100&page=3",
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({ Authorization: "Bearer access-token" }),
