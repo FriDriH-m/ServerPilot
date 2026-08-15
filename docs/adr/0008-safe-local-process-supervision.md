@@ -35,9 +35,9 @@ component through a per-ServerInstance registry.
 
 ## Alternatives considered
 
-- Execute `.bat` through `cmd.exe`: rejected because a stored argument string would then
-  become shell input and enlarge the MVP execution boundary. A future bounded game
-  profile may introduce a purpose-built launcher after a separate security decision.
+- Execute arbitrary `.bat` files through `cmd.exe`: rejected because a stored argument string
+  would become shell input and enlarge the MVP execution boundary. ADR 0014 adds only the
+  purpose-built Project Zomboid launcher with fixed generated input.
 - Match only PID or process name: rejected because Windows can reuse PIDs and unrelated
   processes can share a name.
 - Keep a `Process` object as the sole identity: rejected because Agent restarts and
@@ -49,8 +49,8 @@ component through a per-ServerInstance registry.
 
 - API path-shape validation remains host-independent; local existence and process
   identity checks live only in the Windows Agent.
-- Existing `.bat`-shaped ServerInstance data is rejected safely by this supervisor. The
-  Project Zomboid profile remains deferred and must not silently introduce shell input.
+- Generic `.bat`-shaped ServerInstance data remains rejected. ADR 0014 documents the separate
+  bounded Project Zomboid profile and its command-interpreter controls.
 - The supervisor tracks the full identity in memory. Restart rediscovery and persisted
   process-state reconciliation remain issue #30.
 - A console process has no graceful window signal, so it reaches the logged, bounded

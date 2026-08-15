@@ -7,6 +7,8 @@ public sealed class CreateServerInstanceRequest
 {
     public Guid AgentId { get; init; }
 
+    public string? Profile { get; init; }
+
     [Required, StringLength(ServerInstanceConfiguration.MaximumNameLength, MinimumLength = 1)]
     public string? Name { get; init; }
 
@@ -16,9 +18,12 @@ public sealed class CreateServerInstanceRequest
     [StringLength(ServerInstanceConfiguration.MaximumArgumentsLength)]
     public string? Arguments { get; init; }
 
-    [Required, StringLength(ServerInstanceConfiguration.MaximumWorkingDirectoryLength, MinimumLength = 1)]
+    [StringLength(ServerInstanceConfiguration.MaximumWorkingDirectoryLength)]
     public string? WorkingDirectory { get; init; }
 
-    [Required, StringLength(ServerInstanceConfiguration.MaximumProcessNameLength, MinimumLength = 1)]
+    [StringLength(ServerInstanceConfiguration.MaximumProcessNameLength)]
     public string? ProcessName { get; init; }
+
+    [StringLength(ServerInstanceConfiguration.MaximumWorkingDirectoryLength)]
+    public string? DataDirectory { get; init; }
 }

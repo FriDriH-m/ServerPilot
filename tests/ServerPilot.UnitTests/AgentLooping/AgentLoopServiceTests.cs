@@ -80,10 +80,12 @@ public sealed class AgentLoopServiceTests
         Guid.NewGuid(),
         "New",
         new ClaimedAgentServerInstance(
+            "Generic",
             @"C:\Servers\server.exe",
             string.Empty,
             @"C:\Servers",
-            "server"));
+            "server",
+            null));
 
     private sealed class RecordingAgentApiClient(ClaimedAgentCommand command) : IAgentApiClient
     {

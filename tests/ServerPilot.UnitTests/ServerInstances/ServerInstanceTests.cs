@@ -77,6 +77,59 @@ public sealed class ServerInstanceTests
     }
 
     [Fact]
+    public void ProjectZomboidConfigurationAppliesCanonicalDefaultsAndPaths()
+    {
+        bool created = ServerInstanceConfiguration.TryCreate(
+            ServerInstanceProfile.ProjectZomboid,
+            "Zomboid",
+            @"C:\Servers\PZ\StartServer64.bat",
+            string.Empty,
+            @"C:\Servers\PZ",
+            "java",
+            @"C:\Servers\PZ Data",
+            out ServerInstanceConfiguration? configuration);
+
+        Assert.True(created);
+        Assert.Equal(ServerInstanceProfile.ProjectZomboid, configuration!.Profile);
+        Assert.Equal(@"C:\Servers\PZ Data", configuration.DataDirectory);
+
+        ProjectZomboidServerPaths paths = ProjectZomboidServerPaths.Create(
+            configuration.DataDirectory!);
+        Assert.Equal(@"C:\Servers\PZ Data\Server\servertest.ini", paths.MainConfigurationPath);
+        Assert.Equal(@"C:\Servers\PZ Data\Logs", paths.LogsDirectory);
+        Assert.Equal(
+            @"C:\Servers\PZ Data\Saves\Multiplayer\servertest",
+            paths.SaveDirectory);
+    }
+
+    [Theory]
+    [InlineData(@"C:\Servers\PZ\other.bat", "", @"C:\Servers\PZ", "java", @"C:\Data")]
+    [InlineData(@"C:\Servers\PZ\StartServer64.bat", "-x", @"C:\Servers\PZ", "java", @"C:\Data")]
+    [InlineData(@"C:\Servers\PZ\StartServer64.bat", "", @"C:\Servers\Other", "java", @"C:\Data")]
+    [InlineData(@"C:\Servers\PZ\StartServer64.bat", "", @"C:\Servers\PZ", "javaw", @"C:\Data")]
+    [InlineData(@"C:\Servers\PZ\StartServer64.bat", "", @"C:\Servers\PZ", "java", @"C:\Data&whoami")]
+    public void ProjectZomboidConfigurationRejectsAmbiguousLaunchInputs(
+        string executablePath,
+        string arguments,
+        string workingDirectory,
+        string processName,
+        string dataDirectory)
+    {
+        bool created = ServerInstanceConfiguration.TryCreate(
+            ServerInstanceProfile.ProjectZomboid,
+            "Zomboid",
+            executablePath,
+            arguments,
+            workingDirectory,
+            processName,
+            dataDirectory,
+            out ServerInstanceConfiguration? configuration);
+
+        Assert.False(created);
+        Assert.Null(configuration);
+    }
+
+    [Fact]
     public void CreateAndUpdatePreserveStateInvariants()
     {
         ServerInstance instance = ServerInstance.Create(

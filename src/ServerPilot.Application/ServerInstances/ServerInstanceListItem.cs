@@ -5,6 +5,7 @@ namespace ServerPilot.Application.ServerInstances;
 public sealed record ServerInstanceListItem(
     Guid Id,
     Guid AgentId,
+    ServerInstanceProfile Profile,
     string Name,
     ServerInstanceStatus Status,
     ServerInstanceStatus ReportedStatus,

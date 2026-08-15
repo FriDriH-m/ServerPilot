@@ -239,6 +239,21 @@ public sealed class PostgreSqlPersistenceTests : IAsyncLifetime, IDisposable
                      {createdAt}, {createdAt})
                 """, CancellationToken.None));
         Assert.Equal("ck_server_instances_valid_state", invalidState.ConstraintName);
+
+        PostgresException invalidProfile = await Assert.ThrowsAsync<PostgresException>(() =>
+            dbContext.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO server_instances
+                    (id, agent_id, profile, name, executable_path, arguments,
+                     working_directory, process_name, data_directory, status,
+                     last_process_id, created_at, updated_at)
+                VALUES
+                    ({Guid.NewGuid()}, {agent.Id}, 1, {"Project Zomboid"},
+                     {"C:\\Servers\\ProjectZomboid\\StartServer64.bat"}, {"--unsafe"},
+                     {"C:\\Servers\\ProjectZomboid"}, {"java"},
+                     {"C:\\ServerPilotData\\ProjectZomboid"}, 1, NULL,
+                     {createdAt}, {createdAt})
+                """, CancellationToken.None));
+        Assert.Equal("ck_server_instances_trimmed_configuration", invalidProfile.ConstraintName);
     }
 
     [Fact]

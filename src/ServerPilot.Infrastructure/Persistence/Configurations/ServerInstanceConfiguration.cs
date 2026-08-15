@@ -41,12 +41,16 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
                     "last_status_reported_at <= updated_at))");
                 tableBuilder.HasCheckConstraint(
                     TrimmedConfigurationConstraintName,
+                    "profile IN (0, 1) AND " +
                     "name = btrim(name) AND name <> '' AND " +
                     "executable_path = btrim(executable_path) AND executable_path <> '' AND " +
                     "arguments = btrim(arguments) AND " +
                     "working_directory = btrim(working_directory) AND working_directory <> '' AND " +
                     "process_name = btrim(process_name) AND process_name <> '' AND " +
-                    "position('/' in process_name) = 0 AND position(':' in process_name) = 0");
+                    "position('/' in process_name) = 0 AND position(':' in process_name) = 0 AND " +
+                    "((profile = 0 AND data_directory IS NULL) OR " +
+                    "(profile = 1 AND data_directory = btrim(data_directory) AND " +
+                    "data_directory <> '' AND arguments = '' AND lower(process_name) = 'java'))");
             });
         builder.HasKey(serverInstance => serverInstance.Id)
             .HasName("pk_server_instances");
@@ -60,6 +64,10 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
         builder.Property(serverInstance => serverInstance.Id).HasColumnName("id");
         builder.Property(serverInstance => serverInstance.AgentId)
             .HasColumnName("agent_id")
+            .IsRequired();
+        builder.Property(serverInstance => serverInstance.Profile)
+            .HasColumnName("profile")
+            .HasConversion<int>()
             .IsRequired();
         builder.Property(serverInstance => serverInstance.Name)
             .HasColumnName("name")
@@ -81,6 +89,9 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
             .HasColumnName("process_name")
             .HasMaxLength(ServerInstanceDomainConfiguration.MaximumProcessNameLength)
             .IsRequired();
+        builder.Property(serverInstance => serverInstance.DataDirectory)
+            .HasColumnName("data_directory")
+            .HasMaxLength(ServerInstanceDomainConfiguration.MaximumWorkingDirectoryLength);
         builder.Property(serverInstance => serverInstance.Status)
             .HasColumnName("status")
             .HasConversion<int>()

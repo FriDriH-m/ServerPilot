@@ -14,10 +14,12 @@ public enum AgentServerInstanceStatus
 
 public sealed record AssignedAgentServerInstance(
     Guid Id,
+    string Profile,
     string ExecutablePath,
     string Arguments,
     string WorkingDirectory,
     string ProcessName,
+    string? DataDirectory,
     AgentServerInstanceStatus ReportedStatus,
     ProcessIdentity? Identity,
     DateTimeOffset? LastStatusReportedAt);

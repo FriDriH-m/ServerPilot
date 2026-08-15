@@ -217,10 +217,12 @@ public sealed class AgentCommandExecutorTests
         Guid.NewGuid(),
         "New",
         new ClaimedAgentServerInstance(
+            "Generic",
             @"C:\Servers\server.exe",
             "--port 16261",
             @"C:\Servers",
-            "server"));
+            "server",
+            null));
 
     private static ProcessIdentity CreateIdentity() => new(
         42,

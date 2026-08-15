@@ -134,6 +134,72 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
         Assert.Equal(HttpStatusCode.NotFound, foreignResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task ProjectZomboidProfileAppliesSafeDefaultsAndExposesDerivedPaths()
+    {
+        AuthenticationResponse owner = await RegisterUserAsync("zomboid-profile@example.com");
+        RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "Zomboid Agent");
+        ServerInstanceRequest request = CreateRequest(agent.AgentId) with
+        {
+            Profile = "ProjectZomboid",
+            ExecutablePath = @"C:\Servers\ProjectZomboid\StartServer64.bat",
+            Arguments = string.Empty,
+            WorkingDirectory = string.Empty,
+            ProcessName = string.Empty,
+            DataDirectory = @"C:\ServerPilotData\ProjectZomboid",
+        };
+
+        AuthorizeUser(owner.AccessToken);
+        using HttpResponseMessage createResponse = await client.PostAsJsonAsync(
+            "/api/server-instances",
+            request,
+            CancellationToken.None);
+        ServerInstanceResponse created =
+            (await createResponse.Content.ReadFromJsonAsync<ServerInstanceResponse>())!;
+
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        Assert.Equal("ProjectZomboid", created.Profile);
+        Assert.Equal(@"C:\Servers\ProjectZomboid", created.WorkingDirectory);
+        Assert.Equal("java", created.ProcessName);
+        Assert.Equal(request.DataDirectory, created.DataDirectory);
+        Assert.Equal(
+            @"C:\ServerPilotData\ProjectZomboid\Server\servertest.ini",
+            created.ProjectZomboidPaths?.MainConfigurationPath);
+        Assert.Equal(
+            @"C:\ServerPilotData\ProjectZomboid\console.txt",
+            created.ProjectZomboidPaths?.ConsoleLogPath);
+        Assert.Equal(
+            @"C:\ServerPilotData\ProjectZomboid\Saves\Multiplayer\servertest",
+            created.ProjectZomboidPaths?.SaveDirectory);
+
+        using HttpResponseMessage listResponse = await client.GetAsync(
+            "/api/server-instances",
+            CancellationToken.None);
+        string listPayload = await listResponse.Content.ReadAsStringAsync(CancellationToken.None);
+        Assert.Contains("ProjectZomboid", listPayload, StringComparison.Ordinal);
+        Assert.DoesNotContain(request.DataDirectory!, listPayload, StringComparison.Ordinal);
+
+        AuthorizeAgent(agent.Credential);
+        AgentServerInstanceResponse assignment = Assert.Single(
+            (await client.GetFromJsonAsync<AgentServerInstanceResponse[]>(
+                $"/api/agents/{agent.AgentId}/server-instances",
+                CancellationToken.None))!);
+        Assert.Equal("ProjectZomboid", assignment.Profile);
+        Assert.Equal(request.DataDirectory, assignment.DataDirectory);
+
+        AuthorizeUser(owner.AccessToken);
+        using HttpResponseMessage customArguments = await client.PostAsJsonAsync(
+            "/api/server-instances",
+            request with { Arguments = "-servername other" },
+            CancellationToken.None);
+        using HttpResponseMessage unsafeDataDirectory = await client.PostAsJsonAsync(
+            "/api/server-instances",
+            request with { DataDirectory = @"C:\Data&whoami" },
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.BadRequest, customArguments.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, unsafeDataDirectory.StatusCode);
+    }
+
     [Theory]
     [InlineData("//?/C:/Servers/server.exe")]
     [InlineData("//./C:/Servers/server.exe")]
@@ -451,16 +517,21 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
         string ExecutablePath,
         string Arguments,
         string WorkingDirectory,
-        string ProcessName);
+        string ProcessName,
+        string Profile = "Generic",
+        string? DataDirectory = null);
 
     private sealed record ServerInstanceResponse(
         Guid Id,
         Guid AgentId,
+        string Profile,
         string Name,
         string ExecutablePath,
         string Arguments,
         string WorkingDirectory,
         string ProcessName,
+        string? DataDirectory,
+        ProjectZomboidPathsResponse? ProjectZomboidPaths,
         string Status,
         string ReportedStatus,
         int? LastProcessId,
@@ -473,6 +544,7 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
     private sealed record ServerInstanceListResponse(
         Guid Id,
         Guid AgentId,
+        string Profile,
         string Name,
         string Status,
         string ReportedStatus,
@@ -485,6 +557,18 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
 
     private sealed record AgentServerInstanceResponse(
         Guid Id,
+        string Profile,
         string ExecutablePath,
+        string? DataDirectory,
         string ReportedStatus);
+
+    private sealed record ProjectZomboidPathsResponse(
+        string ConfigurationDirectory,
+        string MainConfigurationPath,
+        string SandboxConfigurationPath,
+        string SpawnPointsPath,
+        string SpawnRegionsPath,
+        string LogsDirectory,
+        string ConsoleLogPath,
+        string SaveDirectory);
 }

@@ -43,10 +43,12 @@ public sealed class AgentProcessStateReconciler(
             ProcessSupervisorResolution resolution = supervisors.Resolve(
                 instance.Id,
                 new ProcessSupervisorRequest(
+                    instance.Profile,
                     instance.ExecutablePath,
                     instance.Arguments,
                     instance.WorkingDirectory,
                     instance.ProcessName,
+                    instance.DataDirectory,
                     instance.Identity));
             if (resolution.Supervisor is null)
             {

@@ -172,9 +172,11 @@ public sealed class AgentCommandsController(
             command.CorrelationId,
             delivery.DeliveryKind.ToString(),
             new AgentServerInstanceConfigurationResponse(
+                delivery.ServerInstance.Profile,
                 delivery.ServerInstance.ExecutablePath,
                 delivery.ServerInstance.Arguments,
                 delivery.ServerInstance.WorkingDirectory,
-                delivery.ServerInstance.ProcessName));
+                delivery.ServerInstance.ProcessName,
+                delivery.ServerInstance.DataDirectory));
     }
 }

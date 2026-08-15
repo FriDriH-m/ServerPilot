@@ -10,6 +10,8 @@ idempotent command executor, persisted process identity, restart reconciliation 
 offline ServerInstance semantics, the post-MVP browser authentication client and its
 in-memory access-token lifecycle, plus Windows Service packaging, virtual service identity,
 restricted ProgramData credential storage and explicit managed-server directory grants.
+It also covers the post-MVP Project Zomboid batch-to-Java profile, its fixed shell input,
+child-process discovery and bounded console shutdown.
 
 ## Data flow and trust boundaries
 
@@ -152,7 +154,8 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Command history disappears with its ServerInstance | ServerInstance deletion requires no persisted command history and otherwise returns `409` | Retention and archival policy are outside the MVP |
 | Local paths or launch arguments disclosed broadly | List/history responses and structured logs exclude paths and arguments; full configuration is returned only to the owner and the authenticated target Agent with its claimed command | The owner and target Agent legitimately need the configuration and must protect their credentials |
 | Path traversal or an API-side path check targets the wrong machine | API and Agent enforce the same 2,048-character bound, reject control characters and all normalized device-namespace forms, require a complete UNC server/share root and reject `.`/`..`; Agent also verifies local executable/working-directory existence immediately before launch | Symlink/reparse-point policy is not expanded beyond the exact executable identity check in the MVP |
-| Stored configuration invokes a shell or script | The supervisor accepts a matching native `.exe` only and uses `UseShellExecute = false`; it never invokes `cmd.exe`, PowerShell or command-payload paths | Purpose-built game launchers require a separate bounded decision; `.bat` is rejected today |
+| Stored configuration invokes a shell or script | The Generic supervisor accepts a matching native `.exe` only. The Project Zomboid exception accepts exactly `StartServer64.bat`, rejects custom arguments and shell metacharacters, verifies a bounded launcher contains the GameServer invocation with argument forwarding, and passes only one generated quoted `-cachedir` value to System32 `cmd.exe` | A locally privileged operator can still replace an otherwise valid vendor launcher; protect the install ACL and revalidate after game updates |
+| Batch wrapper hides or substitutes the real game process | The Agent searches only descendants of the launcher for the exact bundled `jre64\bin\java.exe` and persists the Java PID, start time, path, name and profile | A vendor layout or launcher change fails closed until the profile is updated and revalidated |
 | Reused or stale PID terminates an unrelated process | PostgreSQL persists PID plus process start time; after restart the supervisor also matches executable path and normalized process name before adopting or signalling it. Start-time tolerance is strictly less than PostgreSQL's one-microsecond precision; it is not a clock-skew allowance | A process without a previously persisted complete identity is intentionally not auto-adopted |
 | Agent reports state for another Agent's server | Assignment routes require the credential Agent ID to equal the route, and state writes filter by both Agent ID and ServerInstance ID under a row lock | A stolen credential retains authority over its own assigned servers until revoked |
 | Offline Agent fabricates a current stopped/running state | User reads derive `Unreachable` from heartbeat freshness while retaining `ReportedStatus`, PID and report time as stale data; no offline job overwrites process state | The last snapshot can remain stale until the Agent reconnects |
@@ -160,6 +163,7 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Command execution races periodic reconciliation | Both operations share one Agent-side gate, and successful Start/Stop reports verified state before the terminal command result | Reconciliation is intentionally sequential in the MVP |
 | Agent and API clocks differ | API receipt time orders reports; Agent process start time is identity data and is not ordered against the API clock | Operators still need sane clocks for diagnostics and command timestamps |
 | Hung process blocks Agent command execution indefinitely | Graceful and forced waits have separate bounds; the executor converts a final timeout into a safe bounded command failure | Long-running command cancellation policy remains minimal in the MVP |
+| Forced Project Zomboid shutdown loses world data | In the originating Agent session, Stop sends `save`, waits five seconds, sends `quit`, then allows 60 seconds before the identity-checked 10-second forced fallback | Standard input cannot be reattached after Agent restart; a reconciled server can only use the documented forced fallback, so operators should schedule controlled restarts |
 | Active process configuration removed during management | Owner and inactive-state predicates are combined in one conditional delete; active states return `409` | A future command/state transition must handle a deleted inactive instance by verifying existence atomically |
 | Stored process configuration changes after a command is created | Process-critical updates return `409` while the process or a command is active; update and command creation serialize on the ServerInstance row | Configuration revisions and snapshots remain deferred |
 | Security operation or command lifecycle has no usable audit trail | User/Agent registration, login, token operations and credential revocation emit structured events with identifiers but no credential values; command creation, claim, execution, state report and result share the persisted command correlation ID | Central collection, retention and alerting remain outside the MVP |
@@ -211,11 +215,13 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 - Never return a raw Agent command failure message to the user API.
 - Never log Agent failure details or credentials.
 - Reject control characters in Agent metadata and command failure details before persistence.
-- Never expose ServerInstance executable paths, working directories or arguments in a list response or structured log.
+- Never expose ServerInstance executable, working/data directories or arguments in a list response or structured log.
 - A user cannot delete a ServerInstance while its persisted process state is active.
 - The Agent may execute only a stored ServerInstance configuration, never a command path or arguments supplied directly by a command request.
 - Return stored process configuration only to its owner or the authenticated target Agent
   as part of that Agent's claimed command.
-- Never pass stored process configuration to a shell, PowerShell or `UseShellExecute`.
+- Never pass stored process configuration to a shell, PowerShell or `UseShellExecute`, except
+  the ADR 0014 Project Zomboid profile's canonical launcher and single generated `-cachedir`
+  argument after both API and Agent validation.
 - Never signal a PID until its start time, executable path and process name match the tracked identity.
 - Use HTTPS outside local development.

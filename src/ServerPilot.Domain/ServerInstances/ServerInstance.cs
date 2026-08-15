@@ -36,6 +36,8 @@ public sealed class ServerInstance
 
     public Guid AgentId { get; private set; }
 
+    public ServerInstanceProfile Profile { get; private set; }
+
     public string Name { get; private set; } = null!;
 
     public string ExecutablePath { get; private set; } = null!;
@@ -45,6 +47,8 @@ public sealed class ServerInstance
     public string WorkingDirectory { get; private set; } = null!;
 
     public string ProcessName { get; private set; } = null!;
+
+    public string? DataDirectory { get; private set; }
 
     public ServerInstanceStatus Status { get; private set; }
 
@@ -172,10 +176,12 @@ public sealed class ServerInstance
 
     private void ApplyConfiguration(ServerInstanceConfiguration configuration)
     {
+        Profile = configuration.Profile;
         Name = configuration.Name;
         ExecutablePath = configuration.ExecutablePath;
         Arguments = configuration.Arguments;
         WorkingDirectory = configuration.WorkingDirectory;
         ProcessName = configuration.ProcessName;
+        DataDirectory = configuration.DataDirectory;
     }
 }

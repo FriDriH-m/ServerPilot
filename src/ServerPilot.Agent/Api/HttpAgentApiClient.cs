@@ -151,6 +151,7 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
             string.IsNullOrWhiteSpace(command.Type) ||
             string.IsNullOrWhiteSpace(command.DeliveryKind) ||
             command.ServerInstance is null ||
+            string.IsNullOrWhiteSpace(command.ServerInstance.Profile) ||
             string.IsNullOrWhiteSpace(command.ServerInstance.ExecutablePath) ||
             command.ServerInstance.Arguments is null ||
             string.IsNullOrWhiteSpace(command.ServerInstance.WorkingDirectory) ||
@@ -183,10 +184,12 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
             command.CorrelationId,
             command.DeliveryKind,
             new ClaimedAgentServerInstance(
+                command.ServerInstance.Profile,
                 command.ServerInstance.ExecutablePath,
                 command.ServerInstance.Arguments,
                 command.ServerInstance.WorkingDirectory,
-                command.ServerInstance.ProcessName));
+                command.ServerInstance.ProcessName,
+                command.ServerInstance.DataDirectory));
     }
 
     public Task MarkCommandRunningAsync(
@@ -272,6 +275,7 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
         AgentServerInstanceResponse response)
     {
         if (response.Id == Guid.Empty ||
+            string.IsNullOrWhiteSpace(response.Profile) ||
             string.IsNullOrWhiteSpace(response.ExecutablePath) ||
             response.Arguments is null ||
             string.IsNullOrWhiteSpace(response.WorkingDirectory) ||
@@ -284,6 +288,20 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
         {
             throw new AgentApiException(
                 "Agent ServerInstance response is missing required fields.",
+                AgentApiFailureKind.Configuration);
+        }
+
+        LocalProcessConfigurationResult configuration = LocalProcessConfiguration.Create(
+            response.Profile,
+            response.ExecutablePath,
+            response.Arguments,
+            response.WorkingDirectory,
+            response.ProcessName,
+            response.DataDirectory);
+        if (!configuration.IsValid || configuration.Configuration is null)
+        {
+            throw new AgentApiException(
+                "Agent ServerInstance response has an invalid profile configuration.",
                 AgentApiFailureKind.Configuration);
         }
 
@@ -301,17 +319,20 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
 
         return new AssignedAgentServerInstance(
             response.Id,
+            response.Profile,
             response.ExecutablePath,
             response.Arguments,
             response.WorkingDirectory,
             response.ProcessName,
+            response.DataDirectory,
             status,
             validRunningIdentity
                 ? new ProcessIdentity(
                     response.LastProcessId!.Value,
                     response.LastProcessStartedAt!.Value,
-                    response.ExecutablePath,
-                    response.ProcessName)
+                    configuration.Configuration.ManagedExecutablePath,
+                    response.ProcessName,
+                    configuration.Configuration.Profile)
                 : null,
             response.LastStatusReportedAt);
     }
@@ -335,6 +356,8 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
 
     private sealed class ClaimServerInstanceResponse
     {
+        public string? Profile { get; init; }
+
         public string? ExecutablePath { get; init; }
 
         public string? Arguments { get; init; }
@@ -342,12 +365,16 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
         public string? WorkingDirectory { get; init; }
 
         public string? ProcessName { get; init; }
+
+        public string? DataDirectory { get; init; }
     }
 
     private sealed class AgentServerInstanceResponse
     {
         public Guid Id { get; init; }
 
+        public string? Profile { get; init; }
+
         public string? ExecutablePath { get; init; }
 
         public string? Arguments { get; init; }
@@ -355,6 +382,8 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
         public string? WorkingDirectory { get; init; }
 
         public string? ProcessName { get; init; }
+
+        public string? DataDirectory { get; init; }
 
         public string? ReportedStatus { get; init; }
 

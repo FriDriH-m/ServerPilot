@@ -125,10 +125,12 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
                    delivered_command.attempt_count,
                    delivered_command.correlation_id,
                    delivered_command.is_recovery,
+                   server_instance.profile,
                    server_instance.executable_path,
                    server_instance.arguments,
                    server_instance.working_directory,
-                   server_instance.process_name
+                   server_instance.process_name,
+                   server_instance.data_directory
             FROM delivered_command
             INNER JOIN server_instances AS server_instance
                 ON server_instance.id = delivered_command.server_instance_id
@@ -216,10 +218,12 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
             ? AgentCommandDeliveryKind.Recovery
             : AgentCommandDeliveryKind.New;
         ServerInstanceExecutionDetails serverInstance = new(
-            reader.GetString(13),
+            ((ServerInstanceProfile)reader.GetInt32(13)).ToString(),
             reader.GetString(14),
             reader.GetString(15),
-            reader.GetString(16));
+            reader.GetString(16),
+            reader.GetString(17),
+            reader.IsDBNull(18) ? null : reader.GetString(18));
         return new ClaimedServerCommandDetails(details, deliveryKind, serverInstance);
     }
 

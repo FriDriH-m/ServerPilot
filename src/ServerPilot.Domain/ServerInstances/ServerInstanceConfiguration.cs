@@ -9,18 +9,24 @@ public sealed class ServerInstanceConfiguration
     public const int MaximumProcessNameLength = 255;
 
     private ServerInstanceConfiguration(
+        ServerInstanceProfile profile,
         string name,
         string executablePath,
         string arguments,
         string workingDirectory,
-        string processName)
+        string processName,
+        string? dataDirectory)
     {
+        Profile = profile;
         Name = name;
         ExecutablePath = executablePath;
         Arguments = arguments;
         WorkingDirectory = workingDirectory;
         ProcessName = processName;
+        DataDirectory = dataDirectory;
     }
+
+    public ServerInstanceProfile Profile { get; }
 
     public string Name { get; }
 
@@ -32,6 +38,8 @@ public sealed class ServerInstanceConfiguration
 
     public string ProcessName { get; }
 
+    public string? DataDirectory { get; }
+
     public static bool TryCreate(
         string? name,
         string? executablePath,
@@ -39,9 +47,29 @@ public sealed class ServerInstanceConfiguration
         string? workingDirectory,
         string? processName,
         out ServerInstanceConfiguration? configuration)
+        => TryCreate(
+            ServerInstanceProfile.Generic,
+            name,
+            executablePath,
+            arguments,
+            workingDirectory,
+            processName,
+            dataDirectory: null,
+            out configuration);
+
+    public static bool TryCreate(
+        ServerInstanceProfile profile,
+        string? name,
+        string? executablePath,
+        string? arguments,
+        string? workingDirectory,
+        string? processName,
+        string? dataDirectory,
+        out ServerInstanceConfiguration? configuration)
     {
         configuration = null;
-        if (!TryNormalizeRequired(name, MaximumNameLength, out string normalizedName) ||
+        if (!Enum.IsDefined(profile) ||
+            !TryNormalizeRequired(name, MaximumNameLength, out string normalizedName) ||
             !TryNormalizeWindowsPath(
                 executablePath,
                 MaximumExecutablePathLength,
@@ -56,13 +84,58 @@ public sealed class ServerInstanceConfiguration
             return false;
         }
 
+        string? normalizedDataDirectory = null;
+        if (profile == ServerInstanceProfile.Generic)
+        {
+            if (!string.IsNullOrWhiteSpace(dataDirectory))
+            {
+                return false;
+            }
+        }
+        else if (!TryNormalizeWindowsPath(
+                     dataDirectory,
+                     MaximumWorkingDirectoryLength,
+                     out normalizedDataDirectory) ||
+                 !IsValidProjectZomboidConfiguration(
+                     normalizedExecutablePath,
+                     normalizedArguments,
+                     normalizedWorkingDirectory,
+                     normalizedProcessName,
+                     normalizedDataDirectory))
+        {
+            return false;
+        }
+
         configuration = new ServerInstanceConfiguration(
+            profile,
             normalizedName,
             normalizedExecutablePath,
             normalizedArguments,
             normalizedWorkingDirectory,
-            normalizedProcessName);
+            normalizedProcessName,
+            normalizedDataDirectory);
         return true;
+    }
+
+    private static bool IsValidProjectZomboidConfiguration(
+        string executablePath,
+        string arguments,
+        string workingDirectory,
+        string processName,
+        string dataDirectory)
+    {
+        string? launcherDirectory = WindowsPathSyntax.GetDirectoryName(executablePath);
+        return string.Equals(
+                WindowsPathSyntax.GetFileName(executablePath),
+                "StartServer64.bat",
+                StringComparison.OrdinalIgnoreCase) &&
+            launcherDirectory is not null &&
+            WindowsPathSyntax.PathsEqual(launcherDirectory, workingDirectory) &&
+            arguments.Length == 0 &&
+            string.Equals(processName, "java", StringComparison.OrdinalIgnoreCase) &&
+            WindowsPathSyntax.IsSafeCommandArgumentPath(executablePath) &&
+            WindowsPathSyntax.IsSafeCommandArgumentPath(workingDirectory) &&
+            WindowsPathSyntax.IsSafeCommandArgumentPath(dataDirectory);
     }
 
     private static bool TryNormalizeWindowsPath(

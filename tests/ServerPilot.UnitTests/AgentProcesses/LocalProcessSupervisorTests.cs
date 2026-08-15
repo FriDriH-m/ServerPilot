@@ -121,6 +121,51 @@ public sealed class LocalProcessSupervisorTests
         Assert.Equal(TimeSpan.FromSeconds(2), platform.ObservedTimeouts[0]);
     }
 
+    [Theory]
+    [InlineData("java", ProcessSupervisorFailure.ManagedExecutableNotFound)]
+    [InlineData("data", ProcessSupervisorFailure.DataDirectoryNotFound)]
+    [InlineData("configuration", ProcessSupervisorFailure.ProfileConfigurationNotFound)]
+    public async Task ProjectZomboidMissingPathsProduceActionableFailures(
+        string missing,
+        ProcessSupervisorFailure expectedFailure)
+    {
+        const string launcher = @"C:\Servers\ProjectZomboid\StartServer64.bat";
+        const string workingDirectory = @"C:\Servers\ProjectZomboid";
+        const string dataDirectory = @"C:\ServerPilotData\ProjectZomboid";
+        LocalProcessConfigurationResult configuration = LocalProcessConfiguration.Create(
+            "ProjectZomboid",
+            launcher,
+            string.Empty,
+            workingDirectory,
+            "java",
+            dataDirectory);
+        FakeProcessPlatform platform = new();
+        if (missing == "java")
+        {
+            platform.MissingFiles.Add(@"C:\Servers\ProjectZomboid\jre64\bin\java.exe");
+        }
+        else if (missing == "data")
+        {
+            platform.MissingDirectories.Add(dataDirectory);
+        }
+        else
+        {
+            platform.MissingFiles.Add(
+                @"C:\ServerPilotData\ProjectZomboid\Server\servertest.ini");
+        }
+
+        using LocalProcessSupervisor supervisor = new(
+            Guid.NewGuid(),
+            configuration.Configuration!,
+            platform,
+            NullLogger<LocalProcessSupervisor>.Instance);
+        ProcessSupervisorResult result = await supervisor.StartAsync(CancellationToken.None);
+
+        Assert.Equal(ProcessSupervisorStatus.Failed, result.Status);
+        Assert.Equal(expectedFailure, result.Failure);
+        Assert.Equal(0, platform.LaunchCalls);
+    }
+
     private static LocalProcessSupervisor CreateSupervisor(
         FakeProcessPlatform platform,
         ProcessIdentity? identity = null)
@@ -168,6 +213,12 @@ public sealed class LocalProcessSupervisorTests
 
         public Queue<ProcessPlatformStatus> WaitResults { get; } = new();
 
+        public HashSet<string> MissingFiles { get; } =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        public HashSet<string> MissingDirectories { get; } =
+            new(StringComparer.OrdinalIgnoreCase);
+
         public List<TimeSpan> ObservedTimeouts { get; } = [];
 
         public int LaunchCalls { get; private set; }
@@ -176,25 +227,32 @@ public sealed class LocalProcessSupervisorTests
 
         public int ForceStopCalls { get; private set; }
 
-        public bool FileExists(string path) => ExecutableExists;
+        public bool FileExists(string path) =>
+            ExecutableExists && !MissingFiles.Contains(path);
 
-        public bool DirectoryExists(string path) => WorkingDirectoryExists;
+        public bool DirectoryExists(string path) =>
+            WorkingDirectoryExists && !MissingDirectories.Contains(path);
 
-        public ProcessLaunchResult Launch(LocalProcessConfiguration configuration)
+        public Task<ProcessLaunchResult> LaunchAsync(
+            LocalProcessConfiguration configuration,
+            CancellationToken cancellationToken)
         {
             LaunchCalls++;
-            return new ProcessLaunchResult(ProcessPlatformStatus.Succeeded, LaunchIdentity);
+            return Task.FromResult(
+                new ProcessLaunchResult(ProcessPlatformStatus.Succeeded, LaunchIdentity));
         }
 
-        public ProcessLookupResult Lookup(int processId) =>
+        public ProcessLookupResult Lookup(ProcessIdentity identity) =>
             CurrentSnapshot is null
                 ? new ProcessLookupResult(ProcessPlatformStatus.NotFound)
                 : new ProcessLookupResult(ProcessPlatformStatus.Succeeded, CurrentSnapshot);
 
-        public ProcessSignalResult RequestGracefulStop(ProcessIdentity identity)
+        public Task<ProcessSignalResult> RequestGracefulStopAsync(
+            ProcessIdentity identity,
+            CancellationToken cancellationToken)
         {
             GracefulStopCalls++;
-            return new ProcessSignalResult(GracefulStopStatus);
+            return Task.FromResult(new ProcessSignalResult(GracefulStopStatus));
         }
 
         public ProcessSignalResult ForceStop(ProcessIdentity identity)

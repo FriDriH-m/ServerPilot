@@ -213,6 +213,7 @@ API
 - [`docs/mvp.md`](docs/mvp.md) — границы первой версии.
 - [`docs/e2e-validation.md`](docs/e2e-validation.md) — воспроизводимая Windows end-to-end проверка полного MVP и ручной сценарий.
 - [`docs/windows-agent-service.md`](docs/windows-agent-service.md) — сборка, установка, обновление и диагностика Windows Service Agent.
+- [`docs/project-zomboid-server.md`](docs/project-zomboid-server.md) — настройка, безопасный запуск, остановка и проверка профиля Project Zomboid.
 - [`docs/api-conventions.md`](docs/api-conventions.md) — контракты API, валидация, Problem Details и correlation ID.
 - [`docs/adr/0001-user-password-and-jwt-authentication.md`](docs/adr/0001-user-password-and-jwt-authentication.md) — решение по password hashing и JWT.
 - [`docs/adr/0002-one-time-agent-installation-tokens.md`](docs/adr/0002-one-time-agent-installation-tokens.md) — решение по одноразовым installation tokens.
@@ -227,6 +228,7 @@ API
 - [`docs/adr/0011-compose-migration-startup.md`](docs/adr/0011-compose-migration-startup.md) — решение по one-shot Compose migrations, readiness и clean reset.
 - [`docs/adr/0012-browser-access-token-handling.md`](docs/adr/0012-browser-access-token-handling.md) — решение по memory-only JWT, same-origin Web/API и безопасному отображению ошибок.
 - [`docs/adr/0013-windows-service-agent-delivery.md`](docs/adr/0013-windows-service-agent-delivery.md) — решение по service identity, DPAPI/ACL, доставке и recovery Windows Agent.
+- [`docs/adr/0014-project-zomboid-process-profile.md`](docs/adr/0014-project-zomboid-process-profile.md) — решение по ограниченному batch-to-Java профилю Project Zomboid.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -679,3 +681,8 @@ backend-authoritative process state, PID, latest result и cursor-based command 
 Issue #37 добавляет self-contained Windows Service Agent: отдельную виртуальную учётную
 запись, restricted ProgramData/DPAPI storage, delayed auto-start, recovery, безопасный
 upgrade/uninstall и явные ACL для каталогов управляемых серверов. Консольный режим сохранён.
+Issue #38 добавляет ограниченный профиль Project Zomboid: canonical `StartServer64.bat`,
+отдельный cachedir, проверку bundled Java/configuration, отслеживание реального Java PID,
+restart rediscovery и остановку через `save`/`quit` с ограниченным forced fallback. Generic
+`.exe`-профиль остаётся без изменений; custom server names/arguments, RCON, mod management и
+live log streaming отложены.

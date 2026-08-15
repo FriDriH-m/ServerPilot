@@ -129,11 +129,13 @@ public sealed class ServerInstanceService(
         new(
             serverInstance.Id,
             serverInstance.AgentId,
+            serverInstance.Profile,
             serverInstance.Name,
             serverInstance.ExecutablePath,
             serverInstance.Arguments,
             serverInstance.WorkingDirectory,
             serverInstance.ProcessName,
+            serverInstance.DataDirectory,
             serverInstance.Status,
             serverInstance.Status,
             serverInstance.LastProcessId,

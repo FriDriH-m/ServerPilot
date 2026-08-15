@@ -17,22 +17,26 @@ interface ServerInstanceFormProps {
 
 const emptyRequest: CreateServerInstanceRequest = {
   agentId: "",
+  profile: "Generic",
   name: "",
   executablePath: "",
   arguments: "",
   workingDirectory: "",
   processName: "",
+  dataDirectory: null,
 };
 
 function toRequest(initial: ServerInstanceDetails | undefined) {
   return initial
     ? {
         agentId: initial.agentId,
+        profile: initial.profile,
         name: initial.name,
         executablePath: initial.executablePath,
         arguments: initial.arguments,
         workingDirectory: initial.workingDirectory,
         processName: initial.processName,
+        dataDirectory: initial.dataDirectory,
       }
     : { ...emptyRequest };
 }
@@ -58,6 +62,18 @@ export function ServerInstanceForm({
     setRequest((current) => ({ ...current, [field]: value }));
   }
 
+  function updateProfile(profile: CreateServerInstanceRequest["profile"]) {
+    setRequest((current) => ({
+      ...current,
+      profile,
+      arguments: profile === "ProjectZomboid" ? "" : current.arguments,
+      workingDirectory:
+        profile === "ProjectZomboid" ? "" : current.workingDirectory,
+      processName: profile === "ProjectZomboid" ? "java" : "",
+      dataDirectory: profile === "ProjectZomboid" ? current.dataDirectory : null,
+    }));
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await onSubmit({
@@ -67,6 +83,7 @@ export function ServerInstanceForm({
       arguments: request.arguments.trim(),
       workingDirectory: request.workingDirectory.trim(),
       processName: request.processName.trim(),
+      dataDirectory: request.dataDirectory?.trim() || null,
     });
   }
 
@@ -113,12 +130,31 @@ export function ServerInstanceForm({
           required
         />
 
+        <label htmlFor="server-profile">Profile</label>
+        <select
+          id="server-profile"
+          value={request.profile}
+          onChange={(event) =>
+            updateProfile(
+              event.target.value as CreateServerInstanceRequest["profile"],
+            )
+          }
+          disabled={busy}
+        >
+          <option value="Generic">Generic executable</option>
+          <option value="ProjectZomboid">Project Zomboid</option>
+        </select>
+
         <label htmlFor="server-executable">Executable path</label>
         <input
           id="server-executable"
           value={request.executablePath}
           onChange={(event) => update("executablePath", event.target.value)}
-          placeholder="C:\\Servers\\Game\\server.exe"
+          placeholder={
+            request.profile === "ProjectZomboid"
+              ? "C:\\Servers\\ProjectZomboid\\StartServer64.bat"
+              : "C:\\Servers\\Game\\server.exe"
+          }
           maxLength={2048}
           disabled={busy}
           required
@@ -131,7 +167,7 @@ export function ServerInstanceForm({
           onChange={(event) => update("arguments", event.target.value)}
           placeholder="-port 27015"
           maxLength={4096}
-          disabled={busy}
+          disabled={busy || request.profile === "ProjectZomboid"}
         />
 
         <label htmlFor="server-working-directory">Working directory</label>
@@ -141,8 +177,8 @@ export function ServerInstanceForm({
           onChange={(event) => update("workingDirectory", event.target.value)}
           placeholder="C:\\Servers\\Game"
           maxLength={2048}
-          disabled={busy}
-          required
+          disabled={busy || request.profile === "ProjectZomboid"}
+          required={request.profile === "Generic"}
         />
 
         <label htmlFor="server-process-name">Process name</label>
@@ -152,9 +188,31 @@ export function ServerInstanceForm({
           onChange={(event) => update("processName", event.target.value)}
           placeholder="server"
           maxLength={255}
-          disabled={busy}
-          required
+          disabled={busy || request.profile === "ProjectZomboid"}
+          required={request.profile === "Generic"}
         />
+
+        {request.profile === "ProjectZomboid" ? (
+          <>
+            <label htmlFor="server-data-directory">
+              Project Zomboid data directory
+            </label>
+            <input
+              id="server-data-directory"
+              value={request.dataDirectory ?? ""}
+              onChange={(event) => update("dataDirectory", event.target.value)}
+              placeholder="C:\\ServerPilotData\\ProjectZomboid"
+              maxLength={2048}
+              disabled={busy}
+              required
+            />
+            <p className="field-hint">
+              The canonical servertest configuration must already exist under
+              Server\\servertest.ini. ServerPilot derives the working directory
+              and manages the bundled java process.
+            </p>
+          </>
+        ) : null}
 
         <div className="form-actions">
           <button className="secondary-button" type="button" onClick={onCancel}>

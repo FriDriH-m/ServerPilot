@@ -25,7 +25,11 @@ public enum ProcessSupervisorFailure
 {
     None = 0,
     ExecutableNotFound,
+    ManagedExecutableNotFound,
     WorkingDirectoryNotFound,
+    DataDirectoryNotFound,
+    ProfileConfigurationNotFound,
+    InvalidLauncher,
     StartFailed,
     InspectionFailed,
     AccessDenied,
@@ -57,4 +61,8 @@ public sealed record ProcessStopTimeouts
     public static ProcessStopTimeouts Default { get; } = new(
         TimeSpan.FromSeconds(10),
         TimeSpan.FromSeconds(5));
+
+    public static ProcessStopTimeouts ProjectZomboid { get; } = new(
+        TimeSpan.FromSeconds(60),
+        TimeSpan.FromSeconds(10));
 }

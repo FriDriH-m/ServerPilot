@@ -18,6 +18,54 @@ public sealed class LocalProcessConfigurationTests
         Assert.Equal("server", result.Configuration.ProcessName);
     }
 
+    [Fact]
+    public void CreatesRestrictedProjectZomboidConfiguration()
+    {
+        LocalProcessConfigurationResult result = LocalProcessConfiguration.Create(
+            "ProjectZomboid",
+            @"C:\Servers\Project Zomboid\StartServer64.bat",
+            string.Empty,
+            @"C:\Servers\Project Zomboid",
+            "java",
+            @"C:\Servers\Project Zomboid Data");
+
+        Assert.True(result.IsValid);
+        Assert.Equal(LocalServerProfile.ProjectZomboid, result.Configuration!.Profile);
+        Assert.Equal(
+            @"C:\Servers\Project Zomboid\jre64\bin\java.exe",
+            result.Configuration.ManagedExecutablePath);
+        Assert.Equal(
+            @"C:\Servers\Project Zomboid Data\Server\servertest.ini",
+            result.Configuration.ProjectZomboidConfigurationPath);
+    }
+
+    [Theory]
+    [InlineData(@"C:\Servers\StartServer.bat", "", @"C:\Servers", "java", @"C:\Data")]
+    [InlineData(@"C:\Servers\StartServer64.bat", "-servername other", @"C:\Servers", "java", @"C:\Data")]
+    [InlineData(@"C:\Servers\StartServer64.bat", "", @"C:\Other", "java", @"C:\Data")]
+    [InlineData(@"C:\Servers\StartServer64.bat", "", @"C:\Servers", "javaw", @"C:\Data")]
+    [InlineData(@"C:\Servers\StartServer64.bat", "", @"C:\Servers", "java", @"C:\Data%TEMP%")]
+    public void RejectsUnsafeProjectZomboidProfileVariants(
+        string executablePath,
+        string arguments,
+        string workingDirectory,
+        string processName,
+        string dataDirectory)
+    {
+        LocalProcessConfigurationResult result = LocalProcessConfiguration.Create(
+            "ProjectZomboid",
+            executablePath,
+            arguments,
+            workingDirectory,
+            processName,
+            dataDirectory);
+
+        Assert.False(result.IsValid);
+        Assert.Equal(
+            LocalProcessConfigurationError.InvalidProjectZomboidConfiguration,
+            result.Error);
+    }
+
     [Theory]
     [InlineData(@"server.exe", LocalProcessConfigurationError.InvalidExecutablePath)]
     [InlineData(@"\\?\C:\Servers\server.exe", LocalProcessConfigurationError.InvalidExecutablePath)]

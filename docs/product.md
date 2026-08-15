@@ -851,6 +851,12 @@ Windows Agent управляет процессами и файлами, поэ�
 - чтение логов;
 - обнаружение падения.
 
+Первый ограниченный профиль реализован в post-MVP issue #38: canonical
+`StartServer64.bat`, фиксированный `servertest`, обнаружение bundled Java process и
+ограниченная остановка через `save`/`quit` с forced fallback. Setup и текущие ограничения
+описаны в [`project-zomboid-server.md`](project-zomboid-server.md); произвольные `.bat`,
+custom arguments, RCON и log streaming в этот шаг не входят.
+
 ### Этап 7. Асинхронное взаимодействие
 
 - RabbitMQ;

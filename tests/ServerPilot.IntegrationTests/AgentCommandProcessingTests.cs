@@ -81,12 +81,14 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
         Assert.Equal(1, claimed.AttemptCount);
         Assert.Equal(timeProvider.GetUtcNow(), claimed.ClaimedAt);
         Assert.NotNull(claimed.ServerInstance);
+        Assert.Equal("Generic", claimed.ServerInstance.Profile);
         Assert.Equal(
             $@"C:\Servers\{firstServer.Name}.exe",
             claimed.ServerInstance.ExecutablePath);
         Assert.Equal("--port 16261", claimed.ServerInstance.Arguments);
         Assert.Equal(@"C:\Servers", claimed.ServerInstance.WorkingDirectory);
         Assert.Equal(firstServer.Name, claimed.ServerInstance.ProcessName);
+        Assert.Null(claimed.ServerInstance.DataDirectory);
 
         await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
         ServerPilotDbContext dbContext =
@@ -105,6 +107,48 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
         Assert.Equal(firstCommand.Id, recovered.Id);
         Assert.Equal(AgentCommandDeliveryKind.Recovery.ToString(), recovered.DeliveryKind);
         Assert.Equal(1, recovered.AttemptCount);
+    }
+
+    [Fact]
+    public async Task ProjectZomboidCommandCarriesOnlyTheValidatedProfileConfiguration()
+    {
+        AuthenticationResponse owner = await RegisterUserAsync("zomboid-command@example.com");
+        RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "Zomboid Claim Agent");
+        using HttpResponseMessage createResponse = await SendUserPostAsync(
+            owner.AccessToken,
+            "/api/server-instances",
+            new
+            {
+                AgentId = agent.AgentId,
+                Profile = "ProjectZomboid",
+                Name = "Project Zomboid",
+                ExecutablePath = @"C:\Servers\ProjectZomboid\StartServer64.bat",
+                Arguments = string.Empty,
+                WorkingDirectory = string.Empty,
+                ProcessName = string.Empty,
+                DataDirectory = @"C:\ServerPilotData\ProjectZomboid",
+            });
+        ServerInstanceResponse server =
+            (await createResponse.Content.ReadFromJsonAsync<ServerInstanceResponse>())!;
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        await CreateCommandAsync(owner.AccessToken, server.Id, "start");
+
+        using HttpResponseMessage claimResponse = await SendAgentPostAsync(
+            agent.Credential,
+            $"/api/agents/{agent.AgentId}/commands/claim-next");
+        ServerCommandResponse claimed =
+            (await claimResponse.Content.ReadFromJsonAsync<ServerCommandResponse>())!;
+
+        Assert.Equal(HttpStatusCode.OK, claimResponse.StatusCode);
+        Assert.NotNull(claimed.ServerInstance);
+        Assert.Equal("ProjectZomboid", claimed.ServerInstance.Profile);
+        Assert.Equal(
+            @"C:\Servers\ProjectZomboid\StartServer64.bat",
+            claimed.ServerInstance.ExecutablePath);
+        Assert.Equal(@"C:\Servers\ProjectZomboid", claimed.ServerInstance.WorkingDirectory);
+        Assert.Equal("java", claimed.ServerInstance.ProcessName);
+        Assert.Equal(@"C:\ServerPilotData\ProjectZomboid", claimed.ServerInstance.DataDirectory);
+        Assert.Empty(claimed.ServerInstance.Arguments);
     }
 
     [Fact]
@@ -676,10 +720,12 @@ public sealed class AgentCommandProcessingTests : IAsyncLifetime, IDisposable
         ServerInstanceExecutionResponse? ServerInstance = null);
 
     private sealed record ServerInstanceExecutionResponse(
+        string Profile,
         string ExecutablePath,
         string Arguments,
         string WorkingDirectory,
-        string ProcessName);
+        string ProcessName,
+        string? DataDirectory);
 
     private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {
