@@ -129,6 +129,32 @@ public sealed class AgentRegistrationTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task RegistrationRejectsControlCharactersBeforeConsumingToken()
+    {
+        AuthenticationResponse owner = await RegisterUserAsync("metadata-validation@example.com");
+        CreateInstallationTokenResponse installationToken =
+            await CreateInstallationTokenAsync(owner.AccessToken);
+
+        client.DefaultRequestHeaders.Authorization = null;
+        using HttpResponseMessage invalidResponse = await client.PostAsJsonAsync(
+            RegistrationEndpoint,
+            new
+            {
+                InstallationToken = installationToken.Token,
+                Name = "Primary\u0000Agent",
+                MachineName = "GAME-HOST",
+                OperatingSystem = "Windows 11 Pro",
+                Version = "1.0.0",
+            },
+            CancellationToken.None);
+
+        Assert.Equal(HttpStatusCode.BadRequest, invalidResponse.StatusCode);
+        using HttpResponseMessage retryResponse = await RegisterAgentRequestAsync(
+            installationToken.Token);
+        Assert.Equal(HttpStatusCode.Created, retryResponse.StatusCode);
+    }
+
+    [Fact]
     public async Task CredentialCollisionRollsBackInstallationTokenConsumption()
     {
         AuthenticationResponse owner = await RegisterUserAsync("rollback@example.com");

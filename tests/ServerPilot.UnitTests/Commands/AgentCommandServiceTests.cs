@@ -82,6 +82,27 @@ public sealed class AgentCommandServiceTests
         Assert.Equal(0, repository.FailCalls);
     }
 
+    [Theory]
+    [InlineData("Process\u0000Failed", "message")]
+    [InlineData("ProcessFailed", "message\r\nforged log line")]
+    public async Task FailRejectsControlCharactersWithoutCallingRepository(
+        string errorCode,
+        string errorMessage)
+    {
+        RecordingServerCommandRepository repository = new();
+        AgentCommandService service = new(repository, new FixedTimeProvider(UtcNow));
+
+        AgentCommandTransitionStatus status = await service.FailAsync(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            errorCode,
+            errorMessage,
+            CancellationToken.None);
+
+        Assert.Equal(AgentCommandTransitionStatus.InvalidFailureDetails, status);
+        Assert.Equal(0, repository.FailCalls);
+    }
+
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => utcNow;

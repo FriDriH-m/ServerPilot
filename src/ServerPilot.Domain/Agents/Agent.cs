@@ -132,10 +132,12 @@ public sealed class Agent
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value, parameterName);
         string normalizedValue = value.Trim();
-        if (normalizedValue.Length > maximumLength)
+        if (normalizedValue.Length > maximumLength ||
+            normalizedValue.Any(char.IsControl))
         {
             throw new ArgumentException(
-                $"{parameterName} cannot exceed {maximumLength} characters.",
+                $"{parameterName} must not contain control characters or exceed " +
+                $"{maximumLength} characters.",
                 parameterName);
         }
 

@@ -101,6 +101,8 @@ public sealed class AgentCommandService(
         out string normalizedValue)
     {
         normalizedValue = value?.Trim() ?? string.Empty;
-        return normalizedValue.Length is > 0 && normalizedValue.Length <= maximumLength;
+        return normalizedValue.Length is > 0 &&
+            normalizedValue.Length <= maximumLength &&
+            !normalizedValue.Any(char.IsControl);
     }
 }
