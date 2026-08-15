@@ -44,6 +44,21 @@ public sealed class AgentOptionsTests
         Assert.Throws<InvalidOperationException>(options.Validate);
     }
 
+    [Fact]
+    public void RejectsControlCharactersInAgentName()
+    {
+        AgentOptions options = new()
+        {
+            ApiBaseUrl = "https://api.example.test",
+            Name = "test\r\nforged-agent",
+            HeartbeatIntervalSeconds = 10,
+            CommandPollingIntervalSeconds = 5,
+            ProcessReconciliationIntervalSeconds = 10,
+        };
+
+        Assert.Throws<InvalidOperationException>(options.Validate);
+    }
+
     private static AgentOptions CreateValidOptions(string apiBaseUrl = "https://api.example.test") => new()
     {
         ApiBaseUrl = apiBaseUrl,

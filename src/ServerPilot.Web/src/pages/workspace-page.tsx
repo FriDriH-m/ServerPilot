@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   serverPilotApi,
   type AgentSummary,
@@ -28,6 +28,10 @@ interface WorkspacePageProps {
 
 type FormMode = "create" | "edit" | null;
 
+const overviewRefreshIntervalMilliseconds = 15_000;
+const detailRefreshIntervalMilliseconds = 10_000;
+const listPageSize = 100;
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -49,11 +53,14 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
   const { session, logout } = useAuth();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [servers, setServers] = useState<ServerInstanceSummary[]>([]);
+  const [agentPage, setAgentPage] = useState(1);
+  const [serverPage, setServerPage] = useState(1);
   const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
   const [selectedServer, setSelectedServer] =
     useState<ServerInstanceDetails | null>(null);
   const [commands, setCommands] = useState<ServerCommand[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const hasLoadedAdditionalCommandPages = useRef(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -67,7 +74,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
   const accessToken = session?.accessToken ?? "";
 
   const refreshOverview = useCallback(
-    async (background = false) => {
+    async (background = false, signal?: AbortSignal) => {
       if (!accessToken) {
         return;
       }
@@ -77,9 +84,13 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
       }
       try {
         const [agentItems, serverItems] = await Promise.all([
-          api.listAgents(accessToken),
-          api.listServerInstances(accessToken),
+          api.listAgents(accessToken, agentPage, signal),
+          api.listServerInstances(accessToken, serverPage, signal),
         ]);
+        if (signal?.aborted) {
+          return;
+        }
+
         setAgents(agentItems);
         setServers(serverItems);
         setSelectedServerId((current) =>
@@ -93,18 +104,35 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
           setOverviewError(error);
         }
       } finally {
-        if (!background) {
+        if (!background && !signal?.aborted) {
           setInitialLoading(false);
         }
       }
     },
-    [accessToken, api],
+    [accessToken, agentPage, api, serverPage],
   );
 
   useEffect(() => {
-    void refreshOverview();
-    const timer = window.setInterval(() => void refreshOverview(true), 10_000);
-    return () => window.clearInterval(timer);
+    const controller = new AbortController();
+    let timer: number | undefined;
+
+    async function refreshAndSchedule(background: boolean) {
+      await refreshOverview(background, controller.signal);
+      if (!controller.signal.aborted) {
+        timer = window.setTimeout(
+          () => void refreshAndSchedule(true),
+          overviewRefreshIntervalMilliseconds,
+        );
+      }
+    }
+
+    void refreshAndSchedule(false);
+    return () => {
+      controller.abort();
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
   }, [refreshOverview]);
 
   useEffect(() => {
@@ -120,7 +148,9 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
     setSelectedServer(null);
     setCommands([]);
     setNextCursor(null);
+    hasLoadedAdditionalCommandPages.current = false;
     setDetailError(null);
+    let timer: number | undefined;
 
     async function loadSelection() {
       setDetailLoading(true);
@@ -169,6 +199,9 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
         if (!disposed) {
           setSelectedServer(server);
           setCommands((current) => mergeCommands(current, history.items));
+          if (!hasLoadedAdditionalCommandPages.current) {
+            setNextCursor(history.nextCursor);
+          }
           setDetailError(null);
         }
       } catch (error) {
@@ -178,12 +211,33 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
       }
     }
 
-    void loadSelection();
-    const timer = window.setInterval(() => void refreshState(), 5_000);
+    async function loadAndSchedule() {
+      await loadSelection();
+      if (!disposed) {
+        timer = window.setTimeout(
+          () => void refreshAndSchedule(),
+          detailRefreshIntervalMilliseconds,
+        );
+      }
+    }
+
+    async function refreshAndSchedule() {
+      await refreshState();
+      if (!disposed) {
+        timer = window.setTimeout(
+          () => void refreshAndSchedule(),
+          detailRefreshIntervalMilliseconds,
+        );
+      }
+    }
+
+    void loadAndSchedule();
     return () => {
       disposed = true;
       controller.abort();
-      window.clearInterval(timer);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
     };
   }, [accessToken, api, selectedServerId]);
 
@@ -312,6 +366,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
       );
       setCommands((current) => mergeCommands(current, page.items));
       setNextCursor(page.nextCursor);
+      hasLoadedAdditionalCommandPages.current = true;
     } catch (error) {
       setDetailError(error);
     } finally {
@@ -388,8 +443,9 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
               <p className="empty-copy">Loading Agents…</p>
             ) : agents.length === 0 ? (
               <p className="empty-copy">
-                No Agents are registered yet. Register the Windows Agent before adding
-                a server.
+                {agentPage === 1
+                  ? "No Agents are registered yet. Register the Windows Agent before adding a server."
+                  : "No Agents are on this page. Return to the previous page to review your registered Agents."}
               </p>
             ) : (
               <div className="agent-list">
@@ -405,6 +461,12 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
                 ))}
               </div>
             )}
+            <ListPagination
+              page={agentPage}
+              hasNext={agents.length === listPageSize}
+              itemLabel="Agents"
+              onPageChange={setAgentPage}
+            />
           </section>
 
           <section className="dashboard-panel server-panel" aria-labelledby="servers-title">
@@ -419,7 +481,9 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
               <p className="empty-copy">Loading servers…</p>
             ) : servers.length === 0 ? (
               <p className="empty-copy">
-                No ServerInstances yet. Add one after an Agent is registered.
+                {serverPage === 1
+                  ? "No ServerInstances yet. Add one after an Agent is registered."
+                  : "No ServerInstances are on this page. Return to the previous page to review your servers."}
               </p>
             ) : (
               <div className="server-list">
@@ -445,6 +509,12 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
                 ))}
               </div>
             )}
+            <ListPagination
+              page={serverPage}
+              hasNext={servers.length === listPageSize}
+              itemLabel="ServerInstances"
+              onPageChange={setServerPage}
+            />
           </section>
 
           <section className="dashboard-panel detail-panel" aria-labelledby="server-detail-title">
@@ -580,5 +650,43 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
         </div>
       </main>
     </div>
+  );
+}
+
+interface ListPaginationProps {
+  page: number;
+  hasNext: boolean;
+  itemLabel: string;
+  onPageChange: (page: number) => void;
+}
+
+function ListPagination({
+  page,
+  hasNext,
+  itemLabel,
+  onPageChange,
+}: ListPaginationProps) {
+  return (
+    <nav className="list-pagination" aria-label={`${itemLabel} pagination`}>
+      <span>Page {page} · up to {listPageSize} {itemLabel}</span>
+      <div>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={page === 1}
+          onClick={() => onPageChange(page - 1)}
+        >
+          Previous
+        </button>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={!hasNext}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Next
+        </button>
+      </div>
+    </nav>
   );
 }

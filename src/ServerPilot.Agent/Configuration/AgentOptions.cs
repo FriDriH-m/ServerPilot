@@ -39,9 +39,12 @@ public sealed class AgentOptions
             throw new InvalidOperationException("Agent:Name is required.");
         }
 
-        if (Name.Trim().Length > 100)
+        string normalizedName = Name.Trim();
+        if (normalizedName.Length > 100 ||
+            normalizedName.Any(char.IsControl))
         {
-            throw new InvalidOperationException("Agent:Name must not exceed 100 characters.");
+            throw new InvalidOperationException(
+                "Agent:Name must not contain control characters or exceed 100 characters.");
         }
 
         ValidateInterval(HeartbeatIntervalSeconds, nameof(HeartbeatIntervalSeconds));

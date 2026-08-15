@@ -105,6 +105,28 @@ public sealed class ServerCommandTests
         Assert.Null(command.ErrorMessage);
     }
 
+    [Theory]
+    [InlineData("Process\u0000Failed", "message")]
+    [InlineData("ProcessFailed", "message\r\nforged log line")]
+    public void FailureDetailsRejectControlCharacters(
+        string errorCode,
+        string errorMessage)
+    {
+        ServerCommand command = CreateCommand(CreatedAt);
+        Assert.True(command.TryClaim(CreatedAt.AddSeconds(1)));
+        Assert.True(command.TryStart(CreatedAt.AddSeconds(2)));
+
+        Assert.Throws<ArgumentException>(() => command.TryFail(
+            CreatedAt.AddSeconds(3),
+            errorCode,
+            errorMessage));
+
+        Assert.Equal(ServerCommandStatus.Running, command.Status);
+        Assert.Null(command.CompletedAt);
+        Assert.Null(command.ErrorCode);
+        Assert.Null(command.ErrorMessage);
+    }
+
     [Fact]
     public void TransitionTimestampsMustNotPrecedeTheCurrentState()
     {

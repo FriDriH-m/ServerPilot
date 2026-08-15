@@ -185,6 +185,13 @@ public sealed class ServerCommand
                 $"{parameterName} must not exceed {maximumLength} characters.");
         }
 
+        if (normalizedValue.Any(char.IsControl))
+        {
+            throw new ArgumentException(
+                $"{parameterName} must not contain control characters.",
+                parameterName);
+        }
+
         return normalizedValue;
     }
 }

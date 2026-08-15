@@ -2,7 +2,7 @@ namespace ServerPilot.Agent.Processes;
 
 public sealed record LocalProcessConfiguration
 {
-    private const int MaximumPathLength = 1024;
+    private const int MaximumPathLength = 2_048;
     private const int MaximumArgumentsLength = 4096;
     private const int MaximumProcessNameLength = 255;
 
@@ -38,6 +38,7 @@ public sealed record LocalProcessConfiguration
         string normalizedProcessName = processName?.Trim() ?? string.Empty;
 
         if (normalizedExecutablePath.Length is 0 or > MaximumPathLength ||
+            normalizedExecutablePath.Any(char.IsControl) ||
             !WindowsPath.IsSafeAbsolute(normalizedExecutablePath))
         {
             return LocalProcessConfigurationResult.Invalid(
@@ -45,6 +46,7 @@ public sealed record LocalProcessConfiguration
         }
 
         if (normalizedWorkingDirectory.Length is 0 or > MaximumPathLength ||
+            normalizedWorkingDirectory.Any(char.IsControl) ||
             !WindowsPath.IsSafeAbsolute(normalizedWorkingDirectory))
         {
             return LocalProcessConfigurationResult.Invalid(
@@ -91,20 +93,18 @@ public sealed record LocalProcessConfiguration
     {
         public static bool IsSafeAbsolute(string value)
         {
-            if (value.StartsWith(@"\\?\", StringComparison.Ordinal) ||
-                value.StartsWith(@"\\.\", StringComparison.Ordinal))
+            string normalized = value.Replace('/', '\\');
+            if (IsDeviceNamespace(normalized))
             {
                 return false;
             }
 
-            string normalized = value.Replace('/', '\\');
             bool hasDriveRoot = normalized.Length >= 3 &&
                 char.IsAsciiLetter(normalized[0]) &&
                 normalized[1] == ':' &&
                 normalized[2] == '\\';
             bool hasUncRoot = normalized.StartsWith(@"\\", StringComparison.Ordinal) &&
-                normalized.Length > 2 &&
-                normalized[2] != '\\';
+                HasUncServerAndShare(normalized);
 
             if (!hasDriveRoot && !hasUncRoot)
             {
@@ -114,6 +114,31 @@ public sealed record LocalProcessConfiguration
             return normalized
                 .Split('\\', StringSplitOptions.RemoveEmptyEntries)
                 .All(segment => segment is not "." and not "..");
+        }
+
+        private static bool IsDeviceNamespace(string normalizedPath) =>
+            normalizedPath.StartsWith(@"\\?\", StringComparison.Ordinal) ||
+            normalizedPath.StartsWith(@"\\.\", StringComparison.Ordinal) ||
+            normalizedPath.StartsWith(@"\??\", StringComparison.Ordinal) ||
+            normalizedPath.StartsWith(@"\\??\", StringComparison.Ordinal);
+
+        private static bool HasUncServerAndShare(string normalizedPath)
+        {
+            ReadOnlySpan<char> remainder = normalizedPath.AsSpan(2);
+            int serverSeparator = remainder.IndexOf('\\');
+            if (serverSeparator <= 0)
+            {
+                return false;
+            }
+
+            ReadOnlySpan<char> shareAndPath = remainder[(serverSeparator + 1)..];
+            if (shareAndPath.IsEmpty || shareAndPath[0] == '\\')
+            {
+                return false;
+            }
+
+            int shareSeparator = shareAndPath.IndexOf('\\');
+            return shareSeparator != 0;
         }
 
         public static string GetFileName(string value)
