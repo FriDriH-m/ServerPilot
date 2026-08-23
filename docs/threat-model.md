@@ -11,7 +11,8 @@ offline ServerInstance semantics, the post-MVP browser authentication client and
 in-memory access-token lifecycle, plus Windows Service packaging, virtual service identity,
 restricted ProgramData credential storage and explicit managed-server directory grants.
 It also covers the post-MVP Project Zomboid batch-to-Java profile, its fixed shell input,
-child-process discovery and bounded console shutdown.
+child-process discovery and bounded console shutdown, plus the bounded process CPU/RAM/uptime
+snapshot reported by the authenticated Agent and displayed only to the owning user.
 
 ## Data flow and trust boundaries
 
@@ -76,7 +77,12 @@ Registered Agent -> ASP.NET Core API -> PostgreSQL: claim/progress/result
 Registered Agent -> ASP.NET Core API -> PostgreSQL: process-state reconciliation
   | paginated assignments and reports are scoped to the credential Agent ID
   | persisted state: reported status + PID + process start time + server receipt time
+  | Running report: bounded CPU/RAM/uptime; only the latest server-timestamped snapshot persists
   | user view derives Unreachable from Agent heartbeat and preserves the stale snapshot
+
+Owner browser <- ASP.NET Core API <- PostgreSQL: ServerInstance details + latest metrics
+  | stale when Agent is offline, process is not Running or snapshot exceeds offline threshold
+  | browser retains at most 30 fresh samples in memory; no durable metric history
 
 Registered Agent runtime
   | per-request Agent credential; sequential heartbeat, claim and reconciliation loops
@@ -158,6 +164,8 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Batch wrapper hides or substitutes the real game process | The Agent searches only descendants of the launcher for the exact bundled `jre64\bin\java.exe` and persists the Java PID, start time, path, name and profile | A vendor layout or launcher change fails closed until the profile is updated and revalidated |
 | Reused or stale PID terminates an unrelated process | PostgreSQL persists PID plus process start time; after restart the supervisor also matches executable path and normalized process name before adopting or signalling it. Start-time tolerance is strictly less than PostgreSQL's one-microsecond precision; it is not a clock-skew allowance | A process without a previously persisted complete identity is intentionally not auto-adopted |
 | Agent reports state for another Agent's server | Assignment routes require the credential Agent ID to equal the route, and state writes filter by both Agent ID and ServerInstance ID under a row lock | A stolen credential retains authority over its own assigned servers until revoked |
+| Forged, excessive or cross-user process metrics | Metrics are accepted only inside an authenticated target-Agent state report under the ServerInstance row lock; CPU must be finite and 0-100, memory/uptime non-negative, and PostgreSQL enforces a complete Running-only snapshot; only the owner detail endpoint returns it | A stolen Agent credential can report plausible false metrics for its own assigned servers until revoked |
+| Metric sampling creates unbounded storage or request pressure | Reconciliation is sequential and uses the configured interval plus existing bounded retry; PostgreSQL stores one latest snapshot per ServerInstance and the browser keeps at most 30 samples in memory | A very low configured interval can still increase API/database load and must be sized operationally |
 | Offline Agent fabricates a current stopped/running state | User reads derive `Unreachable` from heartbeat freshness while retaining `ReportedStatus`, PID and report time as stale data; no offline job overwrites process state | The last snapshot can remain stale until the Agent reconnects |
 | Process inspection failure is mistaken for stopped | Access denied and other inspection failures produce no state report; only a verified missing/mismatched previously Running identity becomes `Crashed` | Repeated inspection failures remain an operational alert, not a definitive state |
 | Command execution races periodic reconciliation | Both operations share one Agent-side gate, and successful Start/Stop reports verified state before the terminal command result | Reconciliation is intentionally sequential in the MVP |
@@ -206,6 +214,9 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
   action merely because its `/complete` or `/fail` response was lost.
 - Persist process state only from the authenticated target Agent, scoped by both Agent and
   ServerInstance IDs; user commands never assert actual process state.
+- Accept process metrics only with a verified `Running` identity; use server receipt time,
+  validate numeric bounds, persist one latest snapshot and expose it only through the owner-scoped
+  detail response.
 - Require PID plus process start time for `Running`; clear both for `Stopped` and `Crashed`.
 - Derive `Unreachable` from Agent heartbeat freshness without overwriting the last reported
   process state.

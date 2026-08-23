@@ -109,6 +109,9 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
             Status = report.Status.ToString(),
             ProcessId = report.Identity?.ProcessId,
             ProcessStartedAt = report.Identity?.StartedAtUtc,
+            CpuUsagePercent = report.Metrics?.CpuUsagePercent,
+            WorkingSetBytes = report.Metrics?.WorkingSetBytes,
+            UptimeSeconds = report.Metrics?.UptimeSeconds,
         });
         using HttpResponseMessage response = await httpClient.SendAsync(request, cancellationToken);
         EnsureStatus(response, HttpStatusCode.NoContent);

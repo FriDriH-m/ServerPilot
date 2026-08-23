@@ -87,12 +87,29 @@ public sealed class AgentServerInstancesController(
             return InvalidReport();
         }
 
+        bool hasMetricPayload = request.CpuUsagePercent.HasValue ||
+            request.WorkingSetBytes.HasValue ||
+            request.UptimeSeconds.HasValue;
+        if (hasMetricPayload &&
+            (!request.WorkingSetBytes.HasValue || !request.UptimeSeconds.HasValue))
+        {
+            return InvalidReport();
+        }
+
+        ServerInstanceMetricReport? metrics = hasMetricPayload
+            ? new ServerInstanceMetricReport(
+                request.CpuUsagePercent,
+                request.WorkingSetBytes!.Value,
+                request.UptimeSeconds!.Value)
+            : null;
+
         StateReportResult result = await serverInstances.ReportAsync(
             agentId,
             serverInstanceId,
             status,
             request.ProcessId,
             request.ProcessStartedAt,
+            metrics,
             cancellationToken);
         if (result is StateReportResult.Succeeded or StateReportResult.AlreadyApplied)
         {
@@ -106,7 +123,8 @@ public sealed class AgentServerInstancesController(
         }
 
         LogRejectedStateReport(logger, agentId, serverInstanceId, null);
-        return result == StateReportResult.InvalidProcessIdentity
+        return result is StateReportResult.InvalidProcessIdentity or
+            StateReportResult.InvalidMetrics
             ? InvalidReport()
             : Problem(
                 statusCode: StatusCodes.Status409Conflict,
@@ -136,5 +154,5 @@ public sealed class AgentServerInstancesController(
     private ObjectResult InvalidReport() => Problem(
         statusCode: StatusCodes.Status400BadRequest,
         title: "Invalid process-state report",
-        detail: "Running requires a positive PID and process start time; Stopped and Crashed require neither.");
+        detail: "Running requires a positive PID and process start time. Metrics require bounded CPU, non-negative working-set and uptime values. Stopped and Crashed require neither identity nor metrics.");
 }

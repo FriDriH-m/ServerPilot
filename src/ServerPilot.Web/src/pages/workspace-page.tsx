@@ -7,6 +7,7 @@ import {
   type ServerCommand,
   type ServerCommandAction,
   type ServerInstanceDetails,
+  type ServerInstanceMetrics,
   type ServerInstanceSummary,
   type UpdateServerInstanceRequest,
 } from "../api/server-pilot-api";
@@ -14,11 +15,13 @@ import { useAuth } from "../auth/auth-context";
 import { CommandHistory } from "../components/command-history";
 import { ErrorAlert } from "../components/error-alert";
 import { ServerInstanceForm } from "../components/server-instance-form";
+import { ServerMetrics } from "../components/server-metrics";
 import { StatusPill } from "../components/status-pill";
 import {
   formatTimestamp,
   getCommandAvailability,
   isActiveCommand,
+  appendMetricSample,
 } from "../dashboard/dashboard-model";
 import { Link } from "../router";
 
@@ -59,6 +62,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
   const [selectedServer, setSelectedServer] =
     useState<ServerInstanceDetails | null>(null);
   const [commands, setCommands] = useState<ServerCommand[]>([]);
+  const [metricHistory, setMetricHistory] = useState<ServerInstanceMetrics[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const hasLoadedAdditionalCommandPages = useRef(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -139,6 +143,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
     if (!accessToken || !selectedServerId) {
       setSelectedServer(null);
       setCommands([]);
+      setMetricHistory([]);
       setNextCursor(null);
       return undefined;
     }
@@ -147,6 +152,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
     let disposed = false;
     setSelectedServer(null);
     setCommands([]);
+    setMetricHistory([]);
     setNextCursor(null);
     hasLoadedAdditionalCommandPages.current = false;
     setDetailError(null);
@@ -166,6 +172,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
         ]);
         if (!disposed) {
           setSelectedServer(server);
+          setMetricHistory((current) => appendMetricSample(current, server.metrics));
           setCommands(history.items);
           setNextCursor(history.nextCursor);
           setDetailError(null);
@@ -198,6 +205,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
         ]);
         if (!disposed) {
           setSelectedServer(server);
+          setMetricHistory((current) => appendMetricSample(current, server.metrics));
           setCommands((current) => mergeCommands(current, history.items));
           if (!hasLoadedAdditionalCommandPages.current) {
             setNextCursor(history.nextCursor);
@@ -312,6 +320,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
       setSelectedServer(null);
       setSelectedServerId(null);
       setCommands([]);
+      setMetricHistory([]);
       setFormMode(null);
       await refreshOverview(true);
     } catch (error) {
@@ -597,6 +606,11 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
                     </>
                   ) : null}
                 </dl>
+
+                <ServerMetrics
+                  current={selectedServer.metrics}
+                  history={metricHistory}
+                />
 
                 <div className="command-actions">
                   <button

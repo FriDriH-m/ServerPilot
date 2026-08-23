@@ -56,6 +56,15 @@ export interface ServerInstanceDetails extends ServerInstanceSummary {
   processName: string;
   dataDirectory: string | null;
   projectZomboidPaths: ProjectZomboidPaths | null;
+  metrics: ServerInstanceMetrics | null;
+}
+
+export interface ServerInstanceMetrics {
+  cpuUsagePercent: number | null;
+  workingSetBytes: number;
+  uptimeSeconds: number;
+  reportedAt: string;
+  isStale: boolean;
 }
 
 export interface ProjectZomboidPaths {

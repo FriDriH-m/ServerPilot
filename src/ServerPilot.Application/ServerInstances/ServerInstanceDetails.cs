@@ -20,4 +20,6 @@ public sealed record ServerInstanceDetails(
     bool IsStateStale,
     DateTimeOffset? AgentLastSeenAt,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    ServerInstanceMetricsDetails? Metrics = null,
+    bool IsMetricsStale = true);

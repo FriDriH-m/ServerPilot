@@ -440,7 +440,10 @@ POST /api/agents/{agentId}/server-instances/{serverInstanceId}/status
 Список постранично возвращает только ServerInstance этого Agent, их сохранённую
 process-конфигурацию и последнее identity. State report дополнительно проверяет связь
 ServerInstance с Agent, сериализуется row lock с изменением конфигурации и принимает только
-явные `Running`, `Stopped` или `Crashed` с согласованными PID/start-time полями.
+явные `Running`, `Stopped` или `Crashed` с согласованными PID/start-time полями. Post-MVP
+issue #39 расширяет `Running` report bounded CPU/RAM/uptime snapshot: API использует только
+своё receipt time, PostgreSQL хранит последнее измерение, а owner details помечает его stale
+вместе с offline/effective-state semantics. Это не добавляет durable metric history в MVP.
 
 `claim-next` доступен только Agent credential, чей Agent ID точно совпадает с маршрутом.
 Он блокирует строку Agent на время короткого PostgreSQL statement. Уже назначенная этому
@@ -477,6 +480,7 @@ Agent команда в `Claimed` или `Running` выдаётся повтор
 - heartbeat;
 - создание ServerInstance;
 - Agent-scoped list/status report, persisted PID/start time и защита чужого Agent;
+- latest CPU/RAM/uptime snapshot, invalid-bound rejection и owner-only stale view;
 - effective `Unreachable` при offline Agent без потери last reported state;
 - запрет доступа к чужому Agent;
 - создание команды запуска;

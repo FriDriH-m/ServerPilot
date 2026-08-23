@@ -2,6 +2,8 @@ namespace ServerPilot.Domain.ServerInstances;
 
 public sealed class ServerInstance
 {
+    private const long PersistedTimestampPrecisionTicks = TimeSpan.TicksPerMicrosecond;
+
     private ServerInstance()
     {
     }
@@ -58,6 +60,14 @@ public sealed class ServerInstance
 
     public DateTimeOffset? LastStatusReportedAt { get; private set; }
 
+    public double? LastCpuUsagePercent { get; private set; }
+
+    public long? LastWorkingSetBytes { get; private set; }
+
+    public long? LastUptimeSeconds { get; private set; }
+
+    public DateTimeOffset? LastMetricsReportedAt { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private set; }
 
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -95,7 +105,8 @@ public sealed class ServerInstance
         ServerInstanceStatus status,
         int? lastProcessId,
         DateTimeOffset? lastProcessStartedAt,
-        DateTimeOffset reportedAt)
+        DateTimeOffset reportedAt,
+        ServerInstanceMetricReport? metrics = null)
     {
         if (!IsReportableStatus(status))
         {
@@ -112,8 +123,16 @@ public sealed class ServerInstance
             return ServerInstanceStateReportResult.InvalidProcessIdentity;
         }
 
+        if ((metrics is not null && status != ServerInstanceStatus.Running) ||
+            (metrics is not null && !metrics.IsValid))
+        {
+            return ServerInstanceStateReportResult.InvalidMetrics;
+        }
+
         DateTimeOffset utcReportedAt = reportedAt.ToUniversalTime();
-        DateTimeOffset? utcProcessStartedAt = lastProcessStartedAt?.ToUniversalTime();
+        DateTimeOffset? utcProcessStartedAt = lastProcessStartedAt.HasValue
+            ? NormalizePersistedTimestamp(lastProcessStartedAt.Value)
+            : null;
         if (utcReportedAt < CreatedAt ||
             (LastStatusReportedAt.HasValue && utcReportedAt < LastStatusReportedAt.Value))
         {
@@ -124,7 +143,8 @@ public sealed class ServerInstance
         {
             return Status == status &&
                 LastProcessId == lastProcessId &&
-                LastProcessStartedAt == utcProcessStartedAt
+                LastProcessStartedAt == utcProcessStartedAt &&
+                MetricsMatch(metrics)
                 ? ServerInstanceStateReportResult.AlreadyApplied
                 : ServerInstanceStateReportResult.StaleReport;
         }
@@ -134,16 +154,54 @@ public sealed class ServerInstance
             return ServerInstanceStateReportResult.InvalidState;
         }
 
+        bool processIdentityChanged =
+            LastProcessId != lastProcessId ||
+            LastProcessStartedAt != utcProcessStartedAt;
         Status = status;
         LastProcessId = lastProcessId;
         LastProcessStartedAt = utcProcessStartedAt;
         LastStatusReportedAt = utcReportedAt;
+        if (metrics is not null)
+        {
+            LastCpuUsagePercent = metrics.CpuUsagePercent;
+            LastWorkingSetBytes = metrics.WorkingSetBytes;
+            LastUptimeSeconds = metrics.UptimeSeconds;
+            LastMetricsReportedAt = utcReportedAt;
+        }
+        else if (status != ServerInstanceStatus.Running || processIdentityChanged)
+        {
+            ClearMetrics();
+        }
+
         if (utcReportedAt > UpdatedAt)
         {
             UpdatedAt = utcReportedAt;
         }
 
         return ServerInstanceStateReportResult.Succeeded;
+    }
+
+    private bool MetricsMatch(ServerInstanceMetricReport? metrics) => metrics is null
+        ? true
+        : LastCpuUsagePercent == metrics.CpuUsagePercent &&
+          LastWorkingSetBytes == metrics.WorkingSetBytes &&
+          LastUptimeSeconds == metrics.UptimeSeconds &&
+          LastMetricsReportedAt == LastStatusReportedAt;
+
+    private void ClearMetrics()
+    {
+        LastCpuUsagePercent = null;
+        LastWorkingSetBytes = null;
+        LastUptimeSeconds = null;
+        LastMetricsReportedAt = null;
+    }
+
+    private static DateTimeOffset NormalizePersistedTimestamp(DateTimeOffset value)
+    {
+        long utcTicks = value.ToUniversalTime().Ticks;
+        return new DateTimeOffset(
+            utcTicks - utcTicks % PersistedTimestampPrecisionTicks,
+            TimeSpan.Zero);
     }
 
     private static bool IsReportableStatus(ServerInstanceStatus status) => status is

@@ -39,6 +39,12 @@ public sealed class SystemProcessPlatformTests
 
             Assert.Equal(ProcessSupervisorStatus.Started, started.Status);
             Assert.Equal(ProcessSupervisorStatus.Running, inspected.Status);
+            Assert.NotNull(inspected.Snapshot);
+            Assert.True(
+                inspected.Snapshot.WorkingSetBytes is null &&
+                inspected.Snapshot.TotalProcessorTime is null ||
+                inspected.Snapshot.WorkingSetBytes is > 0 &&
+                inspected.Snapshot.TotalProcessorTime >= TimeSpan.Zero);
             Assert.Equal(ProcessSupervisorStatus.Stopped, stopped.Status);
         }
         finally
@@ -110,7 +116,7 @@ public sealed class SystemProcessPlatformTests
             KillFixtureIfStillRunning(startedIdentity);
             if (Directory.Exists(testRoot))
             {
-                Directory.Delete(testRoot, recursive: true);
+                await DeleteDirectoryEventuallyAsync(testRoot);
             }
         }
     }
@@ -235,6 +241,23 @@ public sealed class SystemProcessPlatformTests
         catch (InvalidOperationException)
         {
             // The fixture already exited.
+        }
+    }
+
+    private static async Task DeleteDirectoryEventuallyAsync(string path)
+    {
+        const int maximumAttempts = 10;
+        for (int attempt = 1; attempt <= maximumAttempts; attempt++)
+        {
+            try
+            {
+                Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (IOException) when (attempt < maximumAttempts)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100));
+            }
         }
     }
 }

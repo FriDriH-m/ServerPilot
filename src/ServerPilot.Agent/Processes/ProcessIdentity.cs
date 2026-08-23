@@ -11,7 +11,9 @@ public sealed record ProcessSnapshot(
     int ProcessId,
     DateTimeOffset StartedAtUtc,
     string ExecutablePath,
-    string ProcessName);
+    string ProcessName,
+    TimeSpan? TotalProcessorTime = null,
+    long? WorkingSetBytes = null);
 
 public static class ProcessIdentityPolicy
 {

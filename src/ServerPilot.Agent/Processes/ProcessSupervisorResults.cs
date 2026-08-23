@@ -41,7 +41,8 @@ public sealed record ProcessSupervisorResult(
     ProcessSupervisorStatus Status,
     ProcessIdentity? Identity = null,
     ProcessSupervisorFailure Failure = ProcessSupervisorFailure.None,
-    bool Forced = false);
+    bool Forced = false,
+    ProcessSnapshot? Snapshot = null);
 
 public sealed record ProcessStopTimeouts
 {

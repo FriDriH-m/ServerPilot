@@ -21,7 +21,8 @@ public sealed class AgentProcessStateReconcilerTests
         RecordingRegistry registry = new(
             new FakeSupervisor(new ProcessSupervisorResult(
                 ProcessSupervisorStatus.Running,
-                Identity)));
+                Identity,
+                Snapshot: CreateSnapshot())));
         AgentProcessStateReconciler reconciler = CreateReconciler(apiClient, registry);
 
         await reconciler.ReconcileAsync(CreateCredential(), CancellationToken.None);
@@ -29,6 +30,7 @@ public sealed class AgentProcessStateReconcilerTests
         Assert.Equal(Identity, registry.Request?.TrackedIdentity);
         Assert.Equal(AgentServerInstanceStatus.Running, apiClient.Report?.Status);
         Assert.Equal(Identity, apiClient.Report?.Identity);
+        Assert.Equal(128 * 1024 * 1024, apiClient.Report?.Metrics?.WorkingSetBytes);
     }
 
     [Theory]
@@ -70,6 +72,7 @@ public sealed class AgentProcessStateReconcilerTests
             apiClient,
             new AgentRetryExecutor(new ImmediateDelay()),
             registry,
+            new ProcessMetricsSampler(TimeProvider.System),
             NullLogger<AgentProcessStateReconciler>.Instance);
 
     private static AssignedAgentServerInstance CreateAssignment(
@@ -89,6 +92,14 @@ public sealed class AgentProcessStateReconcilerTests
         Guid.NewGuid(),
         "spac_0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
         AgentCredential.ExpectedAuthorizationScheme);
+
+    private static ProcessSnapshot CreateSnapshot() => new(
+        Identity.ProcessId,
+        Identity.StartedAtUtc,
+        Identity.ExecutablePath,
+        Identity.ProcessName,
+        TimeSpan.FromSeconds(5),
+        128 * 1024 * 1024);
 
     private sealed class RecordingApiClient(AssignedAgentServerInstance assignment)
         : IAgentApiClient

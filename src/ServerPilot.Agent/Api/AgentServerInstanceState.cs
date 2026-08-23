@@ -26,14 +26,17 @@ public sealed record AssignedAgentServerInstance(
 
 public sealed record AgentProcessStateReport(
     AgentServerInstanceStatus Status,
-    ProcessIdentity? Identity)
+    ProcessIdentity? Identity,
+    ProcessMetricSample? Metrics)
 {
-    public static AgentProcessStateReport Running(ProcessIdentity identity) =>
-        new(AgentServerInstanceStatus.Running, identity);
+    public static AgentProcessStateReport Running(
+        ProcessIdentity identity,
+        ProcessMetricSample? metrics = null) =>
+        new(AgentServerInstanceStatus.Running, identity, metrics);
 
     public static AgentProcessStateReport Stopped() =>
-        new(AgentServerInstanceStatus.Stopped, null);
+        new(AgentServerInstanceStatus.Stopped, null, null);
 
     public static AgentProcessStateReport Crashed() =>
-        new(AgentServerInstanceStatus.Crashed, null);
+        new(AgentServerInstanceStatus.Crashed, null, null);
 }

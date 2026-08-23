@@ -47,5 +47,6 @@ public interface IServerInstanceRepository
         int? processId,
         DateTimeOffset? processStartedAt,
         DateTimeOffset reportedAt,
+        ServerInstanceMetricReport? metrics,
         CancellationToken cancellationToken);
 }

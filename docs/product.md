@@ -857,6 +857,12 @@ Windows Agent управляет процессами и файлами, поэ�
 описаны в [`project-zomboid-server.md`](project-zomboid-server.md); произвольные `.bat`,
 custom arguments, RCON и log streaming в этот шаг не входят.
 
+Post-MVP issue #39 добавляет первый bounded operational view без преждевременного перехода
+к полному observability-этапу. Существующая identity-checked Agent reconciliation собирает
+CPU, working set и uptime; PostgreSQL хранит только последний owner-scoped снимок, а browser
+держит не более 30 последних точек в памяти для короткого CPU-графика. Durable metric history,
+Prometheus, alerts и cross-server dashboards остаются отложены.
+
 ### Этап 7. Асинхронное взаимодействие
 
 - RabbitMQ;

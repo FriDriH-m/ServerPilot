@@ -190,3 +190,8 @@ icacls.exe "D:\Servers\ProjectZomboid"
 `%ProgramData%\ServerPilot\Agent\appsettings.json` и снова запустите службу. Никогда не помещайте
 выданный Agent credential в JSON. Installation token допустим только для новой регистрации и
 должен быть удалён после успешного появления `agent-credential.dat`.
+
+`Agent:ProcessReconciliationIntervalSeconds` также задаёт cadence CPU/RAM/uptime для
+управляемых процессов. Не уменьшайте его ради графика без учёта количества ServerInstance:
+итерации последовательны, а медленная API-операция сдвигает следующий снимок и не создаёт
+перекрывающиеся запросы.

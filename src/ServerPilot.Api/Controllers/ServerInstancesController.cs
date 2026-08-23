@@ -333,7 +333,15 @@ public sealed class ServerInstancesController(
             serverInstance.LastStatusReportedAt,
             serverInstance.IsStateStale,
             serverInstance.CreatedAt,
-            serverInstance.UpdatedAt);
+            serverInstance.UpdatedAt,
+            serverInstance.Metrics is null
+                ? null
+                : new ServerInstanceMetricsResponse(
+                    serverInstance.Metrics.CpuUsagePercent,
+                    serverInstance.Metrics.WorkingSetBytes,
+                    serverInstance.Metrics.UptimeSeconds,
+                    serverInstance.Metrics.ReportedAt,
+                    serverInstance.IsMetricsStale));
 
     private static ProjectZomboidPathsResponse? ToProjectZomboidPaths(
         ServerInstanceDetails serverInstance)

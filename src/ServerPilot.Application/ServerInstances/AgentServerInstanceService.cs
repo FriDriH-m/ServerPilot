@@ -36,6 +36,7 @@ public sealed class AgentServerInstanceService(
         ServerInstanceStatus status,
         int? processId,
         DateTimeOffset? processStartedAt,
+        ServerInstanceMetricReport? metrics,
         CancellationToken cancellationToken)
     {
         ValidateAgentId(agentId);
@@ -51,6 +52,7 @@ public sealed class AgentServerInstanceService(
             processId,
             processStartedAt,
             timeProvider.GetUtcNow(),
+            metrics,
             cancellationToken);
     }
 

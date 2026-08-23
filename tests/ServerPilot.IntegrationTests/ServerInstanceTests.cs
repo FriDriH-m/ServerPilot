@@ -394,6 +394,9 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
                 Status = "Running",
                 ProcessId = 4_242,
                 ProcessStartedAt = processStartedAt,
+                CpuUsagePercent = 17.25,
+                WorkingSetBytes = 536_870_912L,
+                UptimeSeconds = 60L,
             },
             CancellationToken.None);
         Assert.Equal(HttpStatusCode.NoContent, runningReport.StatusCode);
@@ -411,6 +414,11 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
             offlineView.LastProcessStartedAt!.Value,
             TimeSpan.FromMilliseconds(1));
         Assert.NotNull(offlineView.LastStatusReportedAt);
+        Assert.NotNull(offlineView.Metrics);
+        Assert.Equal(17.25, offlineView.Metrics.CpuUsagePercent);
+        Assert.Equal(536_870_912, offlineView.Metrics.WorkingSetBytes);
+        Assert.Equal(60, offlineView.Metrics.UptimeSeconds);
+        Assert.True(offlineView.Metrics.IsStale);
 
         AuthorizeAgent(agent.Credential);
         using HttpResponseMessage heartbeat = await client.PostAsync(
@@ -425,17 +433,50 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
             CancellationToken.None))!;
         Assert.Equal(ServerInstanceStatus.Running.ToString(), onlineView.Status);
         Assert.False(onlineView.IsStateStale);
+        Assert.False(onlineView.Metrics!.IsStale);
+
+        AuthorizeAgent(agent.Credential);
+        using HttpResponseMessage stateOnlyRunningReport = await client.PostAsJsonAsync(
+            $"/api/agents/{agent.AgentId}/server-instances/{created.Id}/status",
+            new
+            {
+                Status = "Running",
+                ProcessId = 4_242,
+                ProcessStartedAt = processStartedAt,
+            },
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.NoContent, stateOnlyRunningReport.StatusCode);
+
+        AuthorizeUser(owner.AccessToken);
+        ServerInstanceResponse stateOnlyView =
+            (await client.GetFromJsonAsync<ServerInstanceResponse>(
+                $"/api/server-instances/{created.Id}",
+                CancellationToken.None))!;
+        Assert.Equal(17.25, stateOnlyView.Metrics!.CpuUsagePercent);
 
         AuthorizeAgent(agent.Credential);
         using HttpResponseMessage invalidStopped = await client.PostAsJsonAsync(
             $"/api/agents/{agent.AgentId}/server-instances/{created.Id}/status",
             new { Status = "Stopped", ProcessId = 4_242 },
             CancellationToken.None);
+        using HttpResponseMessage invalidMetrics = await client.PostAsJsonAsync(
+            $"/api/agents/{agent.AgentId}/server-instances/{created.Id}/status",
+            new
+            {
+                Status = "Running",
+                ProcessId = 4_242,
+                ProcessStartedAt = processStartedAt,
+                CpuUsagePercent = 101d,
+                WorkingSetBytes = 1L,
+                UptimeSeconds = 1L,
+            },
+            CancellationToken.None);
         using HttpResponseMessage crashedReport = await client.PostAsJsonAsync(
             $"/api/agents/{agent.AgentId}/server-instances/{created.Id}/status",
             new { Status = "Crashed" },
             CancellationToken.None);
         Assert.Equal(HttpStatusCode.BadRequest, invalidStopped.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidMetrics.StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, crashedReport.StatusCode);
 
         AuthorizeUser(owner.AccessToken);
@@ -446,6 +487,7 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
         Assert.Equal(ServerInstanceStatus.Crashed.ToString(), crashedView.ReportedStatus);
         Assert.Null(crashedView.LastProcessId);
         Assert.Null(crashedView.LastProcessStartedAt);
+        Assert.Null(crashedView.Metrics);
     }
 
     private async Task<AuthenticationResponse> RegisterUserAsync(string email)
@@ -539,7 +581,15 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
         DateTimeOffset? LastStatusReportedAt,
         bool IsStateStale,
         DateTimeOffset CreatedAt,
-        DateTimeOffset UpdatedAt);
+        DateTimeOffset UpdatedAt,
+        ServerInstanceMetricsResponse? Metrics);
+
+    private sealed record ServerInstanceMetricsResponse(
+        double? CpuUsagePercent,
+        long WorkingSetBytes,
+        long UptimeSeconds,
+        DateTimeOffset ReportedAt,
+        bool IsStale);
 
     private sealed record ServerInstanceListResponse(
         Guid Id,

@@ -29,10 +29,12 @@ builder.Services.AddSingleton<IAgentCredentialStore>(_ =>
 builder.Services.AddSingleton<IAgentRegistrationClient, HttpAgentRegistrationClient>();
 builder.Services.AddSingleton<IAgentApiClient, HttpAgentApiClient>();
 builder.Services.AddSingleton<IAgentDelay, SystemAgentDelay>();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<AgentRetryExecutor>();
 builder.Services.AddSingleton<PeriodicAgentLoop>();
 builder.Services.AddSingleton<IProcessPlatform, SystemProcessPlatform>();
 builder.Services.AddSingleton<IProcessSupervisorRegistry, LocalProcessSupervisorRegistry>();
+builder.Services.AddSingleton<ProcessMetricsSampler>();
 builder.Services.AddSingleton<IAgentProcessStateReconciler, AgentProcessStateReconciler>();
 builder.Services.AddSingleton<IAgentCommandExecutor, AgentCommandExecutor>();
 builder.Services.AddSingleton<AgentLoopService>();
