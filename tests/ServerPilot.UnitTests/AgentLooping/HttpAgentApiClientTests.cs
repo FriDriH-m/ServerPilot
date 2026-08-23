@@ -228,7 +228,9 @@ public sealed class HttpAgentApiClientTests
         await client.ReportServerInstanceStateAsync(
             credential,
             serverInstanceId,
-            AgentProcessStateReport.Running(identity),
+            AgentProcessStateReport.Running(
+                identity,
+                new ProcessMetricSample(12.5, 268_435_456, 900)),
             correlationId,
             CancellationToken.None);
 
@@ -240,6 +242,9 @@ public sealed class HttpAgentApiClientTests
         using JsonDocument body = JsonDocument.Parse(handler.Body!);
         Assert.Equal("Running", body.RootElement.GetProperty("status").GetString());
         Assert.Equal(42, body.RootElement.GetProperty("processId").GetInt32());
+        Assert.Equal(12.5, body.RootElement.GetProperty("cpuUsagePercent").GetDouble());
+        Assert.Equal(268_435_456, body.RootElement.GetProperty("workingSetBytes").GetInt64());
+        Assert.Equal(900, body.RootElement.GetProperty("uptimeSeconds").GetInt64());
     }
 
     [Fact]

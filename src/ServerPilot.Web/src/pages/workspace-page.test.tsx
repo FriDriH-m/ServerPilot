@@ -48,6 +48,13 @@ const server: ServerInstanceDetails = {
   processName: "server",
   dataDirectory: null,
   projectZomboidPaths: null,
+  metrics: {
+    cpuUsagePercent: 12.5,
+    workingSetBytes: 268_435_456,
+    uptimeSeconds: 900,
+    reportedAt: "2026-07-30T09:00:00Z",
+    isStale: false,
+  },
 };
 
 function createSession(): AuthenticationSession {
@@ -167,6 +174,10 @@ describe("management dashboard", () => {
 
     expect(await screen.findByText("PID")).toBeInTheDocument();
     expect(screen.getByText("4242")).toBeInTheDocument();
+    expect(screen.getByText("12.5%")).toBeInTheDocument();
+    expect(screen.getByText("256.0 MiB")).toBeInTheDocument();
+    expect(screen.getByText("15m")).toBeInTheDocument();
+    expect(screen.getByText("Live")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start server" })).toBeDisabled();
     const stopButton = screen.getByRole("button", { name: "Stop server" });
     expect(stopButton).toBeEnabled();
@@ -191,6 +202,7 @@ describe("management dashboard", () => {
       status: "Unreachable",
       reportedStatus: "Running",
       isStateStale: true,
+      metrics: server.metrics ? { ...server.metrics, isStale: true } : null,
     };
     const api = createManagementApi({
       listAgents: vi.fn().mockResolvedValue([offlineAgent]),
@@ -202,6 +214,8 @@ describe("management dashboard", () => {
 
     expect(await screen.findByText(/effective state is stale/i)).toBeInTheDocument();
     expect(screen.getAllByText("Offline").length).toBeGreaterThan(0);
+    expect(screen.getByText("Stale")).toBeInTheDocument();
+    expect(screen.getByText(/retained for context/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start server" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Stop server" })).toBeDisabled();
   });

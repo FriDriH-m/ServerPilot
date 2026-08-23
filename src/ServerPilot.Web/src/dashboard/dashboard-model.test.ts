@@ -2,8 +2,14 @@ import { describe, expect, it } from "vitest";
 import type {
   ServerCommand,
   ServerInstanceDetails,
+  ServerInstanceMetrics,
 } from "../api/server-pilot-api";
-import { getCommandAvailability } from "./dashboard-model";
+import {
+  appendMetricSample,
+  formatMemory,
+  formatUptime,
+  getCommandAvailability,
+} from "./dashboard-model";
 
 const server: ServerInstanceDetails = {
   id: "server-1",
@@ -24,6 +30,7 @@ const server: ServerInstanceDetails = {
   processName: "server",
   dataDirectory: null,
   projectZomboidPaths: null,
+  metrics: null,
 };
 
 const activeCommand: ServerCommand = {
@@ -72,5 +79,39 @@ describe("command availability", () => {
     expect(
       getCommandAvailability({ ...server, status: "Running" }, "Online", undefined),
     ).toEqual({ canStart: false, canStop: true });
+  });
+});
+
+describe("process metrics", () => {
+  it("keeps bounded ordered history and clears it when metrics become stale", () => {
+    const samples = Array.from({ length: 35 }, (_, index): ServerInstanceMetrics => ({
+      cpuUsagePercent: index,
+      workingSetBytes: index * 1024,
+      uptimeSeconds: index,
+      reportedAt: new Date(Date.UTC(2026, 7, 23, 9, 0, index)).toISOString(),
+      isStale: false,
+    }));
+
+    const history = samples.reduce(
+      (current, sample) => appendMetricSample(current, sample),
+      [] as ServerInstanceMetrics[],
+    );
+    const duplicate = appendMetricSample(history, samples.at(-1)!);
+    const stale = appendMetricSample(duplicate, {
+      ...samples[0],
+      reportedAt: "2026-08-23T10:00:00.000Z",
+      isStale: true,
+    });
+
+    expect(history).toHaveLength(30);
+    expect(history[0].cpuUsagePercent).toBe(5);
+    expect(duplicate).toHaveLength(30);
+    expect(stale).toEqual([]);
+  });
+
+  it("formats memory and uptime with explicit units", () => {
+    expect(formatMemory(268_435_456)).toBe("256.0 MiB");
+    expect(formatUptime(900)).toBe("15m");
+    expect(formatUptime(90_000)).toBe("1d 1h");
   });
 });

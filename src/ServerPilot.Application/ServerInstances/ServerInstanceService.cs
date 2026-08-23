@@ -158,6 +158,10 @@ public sealed class ServerInstanceService(
         {
             Status = stale ? ServerInstanceStatus.Unreachable : serverInstance.ReportedStatus,
             IsStateStale = stale,
+            IsMetricsStale = stale ||
+                serverInstance.ReportedStatus != ServerInstanceStatus.Running ||
+                serverInstance.Metrics is null ||
+                now - serverInstance.Metrics.ReportedAt > availabilityOptions.OfflineThreshold,
         };
     }
 

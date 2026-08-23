@@ -290,7 +290,10 @@ public sealed class LocalProcessSupervisor : IProcessSupervisor, IDisposable
             return Stale(identity);
         }
 
-        return new ProcessSupervisorResult(ProcessSupervisorStatus.Running, identity);
+        return new ProcessSupervisorResult(
+            ProcessSupervisorStatus.Running,
+            identity,
+            Snapshot: lookup.Snapshot);
     }
 
     private ProcessSupervisorResult Stale(ProcessIdentity identity)

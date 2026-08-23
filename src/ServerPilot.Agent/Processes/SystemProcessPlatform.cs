@@ -661,11 +661,49 @@ public sealed class SystemProcessPlatform : IProcessPlatform, IDisposable
             return null;
         }
 
+        int processId = process.Id;
+        DateTimeOffset startedAtUtc = new(process.StartTime.ToUniversalTime());
+        string processName = process.ProcessName;
+        TryCaptureMetrics(process, out TimeSpan? totalProcessorTime, out long? workingSetBytes);
         return new ProcessSnapshot(
-            process.Id,
-            new DateTimeOffset(process.StartTime.ToUniversalTime()),
+            processId,
+            startedAtUtc,
             executablePath,
-            process.ProcessName);
+            processName,
+            totalProcessorTime,
+            workingSetBytes);
+    }
+
+    private static void TryCaptureMetrics(
+        Process process,
+        out TimeSpan? totalProcessorTime,
+        out long? workingSetBytes)
+    {
+        try
+        {
+            totalProcessorTime = process.TotalProcessorTime;
+            workingSetBytes = process.WorkingSet64;
+        }
+        catch (Win32Exception)
+        {
+            totalProcessorTime = null;
+            workingSetBytes = null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            totalProcessorTime = null;
+            workingSetBytes = null;
+        }
+        catch (InvalidOperationException)
+        {
+            totalProcessorTime = null;
+            workingSetBytes = null;
+        }
+        catch (NotSupportedException)
+        {
+            totalProcessorTime = null;
+            workingSetBytes = null;
+        }
     }
 
     private static void TryTerminateStartedProcess(

@@ -7,4 +7,10 @@ public sealed class ReportServerInstanceStateRequest
     public int? ProcessId { get; init; }
 
     public DateTimeOffset? ProcessStartedAt { get; init; }
+
+    public double? CpuUsagePercent { get; init; }
+
+    public long? WorkingSetBytes { get; init; }
+
+    public long? UptimeSeconds { get; init; }
 }

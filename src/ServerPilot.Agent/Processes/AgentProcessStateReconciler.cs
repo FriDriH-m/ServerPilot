@@ -16,6 +16,7 @@ public sealed class AgentProcessStateReconciler(
     IAgentApiClient apiClient,
     AgentRetryExecutor retry,
     IProcessSupervisorRegistry supervisors,
+    ProcessMetricsSampler metricsSampler,
     ILogger<AgentProcessStateReconciler> logger) : IAgentProcessStateReconciler
 {
     private static readonly Action<ILogger, Guid, Guid, string, int?, Exception?>
@@ -37,6 +38,7 @@ public sealed class AgentProcessStateReconciler(
         IReadOnlyList<AssignedAgentServerInstance> instances = await retry.ExecuteAsync(
             token => apiClient.ListServerInstancesAsync(credential, token),
             cancellationToken);
+        metricsSampler.Retain(instances.Select(instance => instance.Id).ToHashSet());
 
         foreach (AssignedAgentServerInstance instance in instances)
         {
@@ -92,25 +94,33 @@ public sealed class AgentProcessStateReconciler(
         }
     }
 
-    private static AgentProcessStateReport? CreateReport(
+    private AgentProcessStateReport? CreateReport(
         AssignedAgentServerInstance instance,
         ProcessSupervisorResult inspection) => inspection.Status switch
         {
-            ProcessSupervisorStatus.Running when inspection.Identity is not null =>
-                AgentProcessStateReport.Running(inspection.Identity),
+            ProcessSupervisorStatus.Running when inspection.Identity is not null &&
+                inspection.Snapshot is not null =>
+                AgentProcessStateReport.Running(
+                    inspection.Identity,
+                    metricsSampler.Capture(instance.Id, inspection.Snapshot)),
             ProcessSupervisorStatus.NotRunning or ProcessSupervisorStatus.AlreadyStopped =>
-                MissingProcessReport(instance.ReportedStatus),
+                MissingProcessReport(instance.Id, instance.ReportedStatus),
             ProcessSupervisorStatus.StaleProcessId =>
-                MissingProcessReport(instance.ReportedStatus),
+                MissingProcessReport(instance.Id, instance.ReportedStatus),
             _ => null,
         };
 
-    private static AgentProcessStateReport MissingProcessReport(
-        AgentServerInstanceStatus previousStatus) => previousStatus switch
+    private AgentProcessStateReport MissingProcessReport(
+        Guid serverInstanceId,
+        AgentServerInstanceStatus previousStatus)
+    {
+        metricsSampler.Reset(serverInstanceId);
+        return previousStatus switch
         {
             AgentServerInstanceStatus.Running or AgentServerInstanceStatus.Starting =>
                 AgentProcessStateReport.Crashed(),
             AgentServerInstanceStatus.Crashed => AgentProcessStateReport.Crashed(),
             _ => AgentProcessStateReport.Stopped(),
         };
+    }
 }

@@ -229,6 +229,7 @@ API
 - [`docs/adr/0012-browser-access-token-handling.md`](docs/adr/0012-browser-access-token-handling.md) — решение по memory-only JWT, same-origin Web/API и безопасному отображению ошибок.
 - [`docs/adr/0013-windows-service-agent-delivery.md`](docs/adr/0013-windows-service-agent-delivery.md) — решение по service identity, DPAPI/ACL, доставке и recovery Windows Agent.
 - [`docs/adr/0014-project-zomboid-process-profile.md`](docs/adr/0014-project-zomboid-process-profile.md) — решение по ограниченному batch-to-Java профилю Project Zomboid.
+- [`docs/adr/0015-bounded-process-metrics.md`](docs/adr/0015-bounded-process-metrics.md) — решение по bounded-сбору CPU/RAM/uptime, latest-snapshot persistence и transient Web history.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -489,6 +490,12 @@ Command polling не начинается до первой успешной с�
 переводит исчезнувший ранее `Running` процесс в `Crashed`; ошибка inspection не подменяется
 состоянием `Stopped`.
 
+Та же identity-checked проверка собирает working set и uptime процесса. CPU вычисляется
+по разнице cumulative processor time между двумя последовательными снимками, поэтому в
+первом отчёте CPU отсутствует. Интервал `Agent__ProcessReconciliationIntervalSeconds`
+одновременно задаёт cadence метрик; цикл не перекрывается и при медленном API не накапливает
+запросы.
+
 ### Безопасный process supervisor Agent
 
 Supervisor принимает только заранее сохранённую конфигурацию нативного `.exe`, повторно
@@ -557,6 +564,13 @@ reported status, PID, время старта процесса и серверн
 Пользовательский `Status` является effective view: если heartbeat owning Agent устарел,
 он равен `Unreachable`, а `ReportedStatus`, PID и `LastStatusReportedAt` остаются последним
 известным, явно stale снимком. Offline никогда не записывает фиктивный `Stopped`.
+
+Owner-only detail response работающего экземпляра также содержит последний CPU, working
+set, uptime и серверное время измерения. PostgreSQL хранит только один актуальный снимок;
+данные очищаются при подтверждённых `Stopped`/`Crashed`. Метрики помечаются stale при offline
+Agent, не-`Running` состоянии или превышении того же offline threshold. Dashboard удерживает
+не более 30 свежих снимков только в памяти вкладки для короткого CPU-графика — это не
+долгосрочная история и не замена будущему observability-контуру.
 
 ### Команды ServerCommand
 
@@ -685,4 +699,7 @@ Issue #38 добавляет ограниченный профиль Project Zom
 отдельный cachedir, проверку bundled Java/configuration, отслеживание реального Java PID,
 restart rediscovery и остановку через `save`/`quit` с ограниченным forced fallback. Generic
 `.exe`-профиль остаётся без изменений; custom server names/arguments, RCON, mod management и
-live log streaming отложены.
+live log streaming отложены. Issue #39 добавляет owner-scoped CPU/RAM/uptime для управляемого
+процесса: Agent использует существующую reconciliation cadence, PostgreSQL хранит только
+последний снимок, а Web — до 30 transient точек текущей вкладки. Prometheus, durable metric
+history и alerts остаются задачами отдельного этапа наблюдаемости.

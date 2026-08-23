@@ -229,6 +229,7 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
             int? processId,
             DateTimeOffset? processStartedAt,
             DateTimeOffset reportedAt,
+            ServerInstanceMetricReport? metrics,
             CancellationToken cancellationToken)
     {
         await using IDbContextTransaction transaction =
@@ -255,7 +256,8 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
                 status,
                 processId,
                 processStartedAt,
-                reportedAt);
+                reportedAt,
+                metrics);
         ApplicationStateReportResult mapped = result switch
         {
             DomainStateReportResult.Succeeded => ApplicationStateReportResult.Succeeded,
@@ -263,6 +265,8 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
             DomainStateReportResult.InvalidState => ApplicationStateReportResult.InvalidState,
             DomainStateReportResult.InvalidProcessIdentity =>
                 ApplicationStateReportResult.InvalidProcessIdentity,
+            DomainStateReportResult.InvalidMetrics =>
+                ApplicationStateReportResult.InvalidMetrics,
             DomainStateReportResult.StaleReport => ApplicationStateReportResult.StaleReport,
             _ => throw new InvalidOperationException(
                 $"Unsupported process-state report result '{result}'."),
@@ -364,7 +368,16 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
                 .Select(agent => agent.LastSeenAt)
                 .Single(),
             serverInstance.CreatedAt,
-            serverInstance.UpdatedAt));
+            serverInstance.UpdatedAt,
+            serverInstance.LastMetricsReportedAt.HasValue &&
+                serverInstance.LastWorkingSetBytes.HasValue &&
+                serverInstance.LastUptimeSeconds.HasValue
+                ? new ServerInstanceMetricsDetails(
+                    serverInstance.LastCpuUsagePercent,
+                    serverInstance.LastWorkingSetBytes.Value,
+                    serverInstance.LastUptimeSeconds.Value,
+                    serverInstance.LastMetricsReportedAt.Value)
+                : null));
 
     private static ServerInstanceDetails MapDetails(
         ServerInstanceEntity serverInstance,
@@ -387,7 +400,16 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
             false,
             agentLastSeenAt,
             serverInstance.CreatedAt,
-            serverInstance.UpdatedAt);
+            serverInstance.UpdatedAt,
+            serverInstance.LastMetricsReportedAt.HasValue &&
+                serverInstance.LastWorkingSetBytes.HasValue &&
+                serverInstance.LastUptimeSeconds.HasValue
+                ? new ServerInstanceMetricsDetails(
+                    serverInstance.LastCpuUsagePercent,
+                    serverInstance.LastWorkingSetBytes.Value,
+                    serverInstance.LastUptimeSeconds.Value,
+                    serverInstance.LastMetricsReportedAt.Value)
+                : null);
 
     private sealed record ServerInstanceDeletionState(
         ServerInstanceStatus Status,

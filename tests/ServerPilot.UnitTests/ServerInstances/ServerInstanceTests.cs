@@ -278,6 +278,67 @@ public sealed class ServerInstanceTests
         Assert.Equal(42, instance.LastProcessId);
     }
 
+    [Fact]
+    public void RunningMetricsAreValidatedPersistedRetriedAndCleared()
+    {
+        ServerInstance instance = ServerInstance.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            CreateConfiguration("Server"),
+            CreatedAt);
+        DateTimeOffset reportedAt = CreatedAt.AddMinutes(1);
+        DateTimeOffset processStartedAt = CreatedAt.AddSeconds(1).AddTicks(7);
+        ServerInstanceMetricReport metrics = new(25.5, 268_435_456, 3_600);
+
+        ServerInstanceStateReportResult invalid = instance.RecordProcessState(
+            ServerInstanceStatus.Running,
+            42,
+            processStartedAt,
+            reportedAt,
+            new ServerInstanceMetricReport(double.NaN, -1, -1));
+        ServerInstanceStateReportResult applied = instance.RecordProcessState(
+            ServerInstanceStatus.Running,
+            42,
+            processStartedAt,
+            reportedAt,
+            metrics);
+        ServerInstanceStateReportResult retry = instance.RecordProcessState(
+            ServerInstanceStatus.Running,
+            42,
+            processStartedAt,
+            reportedAt,
+            metrics);
+
+        Assert.Equal(ServerInstanceStateReportResult.InvalidMetrics, invalid);
+        Assert.Equal(ServerInstanceStateReportResult.Succeeded, applied);
+        Assert.Equal(ServerInstanceStateReportResult.AlreadyApplied, retry);
+        Assert.Equal(25.5, instance.LastCpuUsagePercent);
+        Assert.Equal(268_435_456, instance.LastWorkingSetBytes);
+        Assert.Equal(3_600, instance.LastUptimeSeconds);
+        Assert.Equal(reportedAt, instance.LastMetricsReportedAt);
+
+        ServerInstanceStateReportResult stateOnlyReport = instance.RecordProcessState(
+            ServerInstanceStatus.Running,
+            42,
+            processStartedAt,
+            reportedAt.AddMilliseconds(500));
+
+        Assert.Equal(ServerInstanceStateReportResult.Succeeded, stateOnlyReport);
+        Assert.Equal(25.5, instance.LastCpuUsagePercent);
+        Assert.Equal(reportedAt, instance.LastMetricsReportedAt);
+
+        instance.RecordProcessState(
+            ServerInstanceStatus.Stopped,
+            null,
+            null,
+            reportedAt.AddSeconds(1));
+
+        Assert.Null(instance.LastCpuUsagePercent);
+        Assert.Null(instance.LastWorkingSetBytes);
+        Assert.Null(instance.LastUptimeSeconds);
+        Assert.Null(instance.LastMetricsReportedAt);
+    }
+
     private static ServerInstanceConfiguration CreateConfiguration(string name)
     {
         bool created = ServerInstanceConfiguration.TryCreate(

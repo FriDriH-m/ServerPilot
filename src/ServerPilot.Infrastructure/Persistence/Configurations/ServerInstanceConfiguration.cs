@@ -18,6 +18,8 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
         "ck_server_instances_valid_timestamps";
     internal const string TrimmedConfigurationConstraintName =
         "ck_server_instances_trimmed_configuration";
+    internal const string ValidMetricsConstraintName =
+        "ck_server_instances_valid_metrics";
 
     public void Configure(EntityTypeBuilder<ServerInstance> builder)
     {
@@ -51,6 +53,16 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
                     "((profile = 0 AND data_directory IS NULL) OR " +
                     "(profile = 1 AND data_directory = btrim(data_directory) AND " +
                     "data_directory <> '' AND arguments = '' AND lower(process_name) = 'java'))");
+                tableBuilder.HasCheckConstraint(
+                    ValidMetricsConstraintName,
+                    "(last_metrics_reported_at IS NULL AND " +
+                    "last_cpu_usage_percent IS NULL AND last_working_set_bytes IS NULL AND " +
+                    "last_uptime_seconds IS NULL) OR " +
+                    "(status = 3 AND last_metrics_reported_at IS NOT NULL AND " +
+                    "last_metrics_reported_at <= last_status_reported_at AND " +
+                    "(last_cpu_usage_percent IS NULL OR " +
+                    "last_cpu_usage_percent BETWEEN 0 AND 100) AND " +
+                    "last_working_set_bytes >= 0 AND last_uptime_seconds >= 0)");
             });
         builder.HasKey(serverInstance => serverInstance.Id)
             .HasName("pk_server_instances");
@@ -103,6 +115,15 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
             .HasColumnType("timestamp with time zone");
         builder.Property(serverInstance => serverInstance.LastStatusReportedAt)
             .HasColumnName("last_status_reported_at")
+            .HasColumnType("timestamp with time zone");
+        builder.Property(serverInstance => serverInstance.LastCpuUsagePercent)
+            .HasColumnName("last_cpu_usage_percent");
+        builder.Property(serverInstance => serverInstance.LastWorkingSetBytes)
+            .HasColumnName("last_working_set_bytes");
+        builder.Property(serverInstance => serverInstance.LastUptimeSeconds)
+            .HasColumnName("last_uptime_seconds");
+        builder.Property(serverInstance => serverInstance.LastMetricsReportedAt)
+            .HasColumnName("last_metrics_reported_at")
             .HasColumnType("timestamp with time zone");
         builder.Property(serverInstance => serverInstance.CreatedAt)
             .HasColumnName("created_at")

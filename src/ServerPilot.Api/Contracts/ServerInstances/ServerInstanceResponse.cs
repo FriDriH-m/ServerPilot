@@ -18,4 +18,5 @@ public sealed record ServerInstanceResponse(
     DateTimeOffset? LastStatusReportedAt,
     bool IsStateStale,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    ServerInstanceMetricsResponse? Metrics);
