@@ -22,6 +22,11 @@ public interface IServerInstanceRepository
         Guid userId,
         CancellationToken cancellationToken);
 
+    Task<ServerInstanceLogDetails?> FindOwnedLogsAsync(
+        Guid id,
+        Guid userId,
+        CancellationToken cancellationToken);
+
     Task<UpdateServerInstanceResult> UpdateOwnedAsync(
         Guid id,
         Guid userId,
@@ -48,5 +53,6 @@ public interface IServerInstanceRepository
         DateTimeOffset? processStartedAt,
         DateTimeOffset reportedAt,
         ServerInstanceMetricReport? metrics,
+        ServerInstanceLogReport? logs,
         CancellationToken cancellationToken);
 }

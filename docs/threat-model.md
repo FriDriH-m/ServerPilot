@@ -12,7 +12,9 @@ in-memory access-token lifecycle, plus Windows Service packaging, virtual servic
 restricted ProgramData credential storage and explicit managed-server directory grants.
 It also covers the post-MVP Project Zomboid batch-to-Java profile, its fixed shell input,
 child-process discovery and bounded console shutdown, plus the bounded process CPU/RAM/uptime
-snapshot reported by the authenticated Agent and displayed only to the owning user.
+snapshot reported by the authenticated Agent and displayed only to the owning user. Issue #40
+adds the profile-derived Project Zomboid `console.txt` read boundary, Agent-side redaction,
+bounded cursor chunks and owner-only recent-log view.
 
 ## Data flow and trust boundaries
 
@@ -83,6 +85,14 @@ Registered Agent -> ASP.NET Core API -> PostgreSQL: process-state reconciliation
 Owner browser <- ASP.NET Core API <- PostgreSQL: ServerInstance details + latest metrics
   | stale when Agent is offline, process is not Running or snapshot exceeds offline threshold
   | browser retains at most 30 fresh samples in memory; no durable metric history
+
+Project Zomboid console.txt -> Registered Agent -> ASP.NET Core API -> PostgreSQL
+  | path is derived from the validated profile; browser never supplies a path
+  | complete UTF-8 lines only; known secret assignments are redacted before transfer
+  | authenticated source ID + stream/offset; 16 KiB/200-line Agent chunks
+  | row-locked append keeps one 32 KiB/400-line window and last delta
+  v
+Owner browser: owner-scoped cursor API, pause/resume/filter and explicit stale/offline state
 
 Registered Agent runtime
   | per-request Agent credential; sequential heartbeat, claim and reconciliation loops
@@ -166,6 +176,11 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 | Agent reports state for another Agent's server | Assignment routes require the credential Agent ID to equal the route, and state writes filter by both Agent ID and ServerInstance ID under a row lock | A stolen credential retains authority over its own assigned servers until revoked |
 | Forged, excessive or cross-user process metrics | Metrics are accepted only inside an authenticated target-Agent state report under the ServerInstance row lock; CPU must be finite and 0-100, memory/uptime non-negative, and PostgreSQL enforces a complete Running-only snapshot; only the owner detail endpoint returns it | A stolen Agent credential can report plausible false metrics for its own assigned servers until revoked |
 | Metric sampling creates unbounded storage or request pressure | Reconciliation is sequential and uses the configured interval plus existing bounded retry; PostgreSQL stores one latest snapshot per ServerInstance and the browser keeps at most 30 samples in memory | A very low configured interval can still increase API/database load and must be sized operationally |
+| Browser or backend selects an arbitrary local log file | Log reporting is enabled only for Project Zomboid; both API and Agent derive `<data>\console.txt` from the validated stored profile, the browser sends only ServerInstance ID/cursor, and reparse-point source roots/files are rejected | Local ACLs remain primary; a local administrator or the Agent service identity can replace otherwise readable files |
+| Old configuration, rotated file or lost response corrupts the log window | The assignment carries a source hash recomputed from the current row; stream ID plus byte offsets reject gaps, exact retry does not append twice, and truncation/replacement/Agent restart sends a reset | Only the latest bounded window is recoverable; older lines are intentionally discarded |
+| Local log leaks secrets or terminal control data | Agent transfers only complete bounded UTF-8 lines, strips BOM/terminal control sequences and redacts known password/token/secret/API-key/Authorization assignments before transmission | Mod-specific or unusual secret formats may remain; operators must avoid logging secrets and protect owner credentials |
+| Log tailing creates unbounded storage, bandwidth or request pressure | Agent reads at most once per five seconds and 16 KiB/200 lines per chunk inside sequential reconciliation; PostgreSQL keeps 32 KiB/400 lines and one delta; Web keeps 400 lines and polls non-overlapping under the user limiter | Many ServerInstances can still create proportional bounded work and require operational sizing |
+| Cross-user or offline log output appears current | Owner query scopes through the Agent owner; Agent reports scope by Agent+ServerInstance under a row lock; API receipt time plus heartbeat derives staleness and the viewer shows missing/unavailable/offline explicitly | A stolen Agent credential can submit plausible text for its own ServerInstances until revoked |
 | Offline Agent fabricates a current stopped/running state | User reads derive `Unreachable` from heartbeat freshness while retaining `ReportedStatus`, PID and report time as stale data; no offline job overwrites process state | The last snapshot can remain stale until the Agent reconnects |
 | Process inspection failure is mistaken for stopped | Access denied and other inspection failures produce no state report; only a verified missing/mismatched previously Running identity becomes `Crashed` | Repeated inspection failures remain an operational alert, not a definitive state |
 | Command execution races periodic reconciliation | Both operations share one Agent-side gate, and successful Start/Stop reports verified state before the terminal command result | Reconciliation is intentionally sequential in the MVP |
@@ -217,6 +232,10 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
 - Accept process metrics only with a verified `Running` identity; use server receipt time,
   validate numeric bounds, persist one latest snapshot and expose it only through the owner-scoped
   detail response.
+- Read logs only from a profile-owned path derived on the Agent; never accept a browser/backend
+  file path, reject reparse-point sources and redact known secrets before transfer.
+- Accept log chunks only from the authenticated target Agent with the current source identifier
+  and contiguous/idempotent stream cursor; persist and display only bounded recent windows.
 - Require PID plus process start time for `Running`; clear both for `Stopped` and `Crashed`.
 - Derive `Unreachable` from Agent heartbeat freshness without overwriting the last reported
   process state.

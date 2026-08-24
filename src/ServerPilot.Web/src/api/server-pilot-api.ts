@@ -67,6 +67,22 @@ export interface ServerInstanceMetrics {
   isStale: boolean;
 }
 
+export type ServerLogStatus =
+  | "Unsupported"
+  | "Waiting"
+  | "Available"
+  | "Missing"
+  | "Unavailable";
+
+export interface ServerInstanceLogs {
+  status: ServerLogStatus;
+  cursor: string | null;
+  reset: boolean;
+  lines: string[];
+  reportedAt: string | null;
+  isStale: boolean;
+}
+
 export interface ProjectZomboidPaths {
   configurationDirectory: string;
   mainConfigurationPath: string;
@@ -132,6 +148,12 @@ export interface ManagementApi {
     id: string,
     signal?: AbortSignal,
   ): Promise<ServerInstanceDetails>;
+  getServerLogs(
+    accessToken: string,
+    id: string,
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<ServerInstanceLogs>;
   createServerInstance(
     accessToken: string,
     request: CreateServerInstanceRequest,
@@ -222,6 +244,19 @@ export class ServerPilotApi implements AuthenticationApi, ManagementApi {
       accessToken,
       signal,
     });
+  }
+
+  getServerLogs(
+    accessToken: string,
+    id: string,
+    cursor?: string,
+    signal?: AbortSignal,
+  ): Promise<ServerInstanceLogs> {
+    const cursorQuery = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+    return this.send<ServerInstanceLogs>(
+      `/server-instances/${id}/logs${cursorQuery}`,
+      { accessToken, signal },
+    );
   }
 
   createServerInstance(

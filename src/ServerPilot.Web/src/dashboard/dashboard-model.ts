@@ -2,6 +2,7 @@ import type {
   ServerCommand,
   ServerInstanceDetails,
   ServerInstanceMetrics,
+  ServerInstanceLogs,
 } from "../api/server-pilot-api";
 
 const activeCommandStatuses = new Set(["Pending", "Claimed", "Running"]);
@@ -12,6 +13,8 @@ export interface CommandAvailability {
   canStop: boolean;
   reason?: string;
 }
+
+export type ServerLogBuffer = ServerInstanceLogs;
 
 export function isActiveCommand(command: ServerCommand | undefined): boolean {
   return command ? activeCommandStatuses.has(command.status) : false;
@@ -81,6 +84,20 @@ export function appendMetricSample(
   return [...withoutDuplicate, sample]
     .sort((left, right) => Date.parse(left.reportedAt) - Date.parse(right.reportedAt))
     .slice(-limit);
+}
+
+export function applyServerLogUpdate(
+  current: ServerLogBuffer | null,
+  update: ServerInstanceLogs,
+  limit = 400,
+): ServerLogBuffer {
+  const lines = update.reset || !current
+    ? update.lines
+    : [...current.lines, ...update.lines];
+  return {
+    ...update,
+    lines: limit < 1 ? [] : lines.slice(-limit),
+  };
 }
 
 export function formatMemory(bytes: number): string {

@@ -130,6 +130,29 @@ describe("ServerPilotApi", () => {
     );
   });
 
+  it("encodes the bounded log cursor without accepting a file path", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        status: "Available",
+        cursor: "next",
+        reset: false,
+        lines: [],
+        reportedAt: "2026-08-24T12:00:00Z",
+        isStale: false,
+      }),
+    );
+    const api = new ServerPilotApi("/api", fetchImplementation);
+
+    await api.getServerLogs("access-token", "server-1", "stream:offset+1");
+
+    expect(fetchImplementation).toHaveBeenCalledWith(
+      "/api/server-instances/server-1/logs?cursor=stream%3Aoffset%2B1",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: "Bearer access-token" }),
+      }),
+    );
+  });
+
   it("accepts an empty successful delete response", async () => {
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(null, { status: 204 }),

@@ -22,21 +22,40 @@ public sealed record AssignedAgentServerInstance(
     string? DataDirectory,
     AgentServerInstanceStatus ReportedStatus,
     ProcessIdentity? Identity,
-    DateTimeOffset? LastStatusReportedAt);
+    DateTimeOffset? LastStatusReportedAt,
+    string? LogSourceIdentifier = null);
+
+public enum AgentServerLogStatus
+{
+    Available = 1,
+    Missing,
+    Unavailable,
+}
+
+public sealed record AgentServerLogReport(
+    AgentServerLogStatus Status,
+    string SourceIdentifier,
+    Guid? StreamId,
+    long? FromOffset,
+    long? ToOffset,
+    bool Reset,
+    string? Content);
 
 public sealed record AgentProcessStateReport(
     AgentServerInstanceStatus Status,
     ProcessIdentity? Identity,
-    ProcessMetricSample? Metrics)
+    ProcessMetricSample? Metrics,
+    AgentServerLogReport? Log = null)
 {
     public static AgentProcessStateReport Running(
         ProcessIdentity identity,
-        ProcessMetricSample? metrics = null) =>
-        new(AgentServerInstanceStatus.Running, identity, metrics);
+        ProcessMetricSample? metrics = null,
+        AgentServerLogReport? log = null) =>
+        new(AgentServerInstanceStatus.Running, identity, metrics, log);
 
-    public static AgentProcessStateReport Stopped() =>
-        new(AgentServerInstanceStatus.Stopped, null, null);
+    public static AgentProcessStateReport Stopped(AgentServerLogReport? log = null) =>
+        new(AgentServerInstanceStatus.Stopped, null, null, log);
 
-    public static AgentProcessStateReport Crashed() =>
-        new(AgentServerInstanceStatus.Crashed, null, null);
+    public static AgentProcessStateReport Crashed(AgentServerLogReport? log = null) =>
+        new(AgentServerInstanceStatus.Crashed, null, null, log);
 }

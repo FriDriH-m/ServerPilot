@@ -118,12 +118,28 @@ Project Zomboid installation on a disposable world:
 5. Temporarily select a missing Java executable, data directory, configuration file and a
    modified launcher that no longer forwards arguments; verify the corresponding actionable
    failure code and restore the files.
+6. Open the Web log viewer and verify that new complete `console.txt` lines appear, pause/resume
+   does not lose the latest bounded window, and truncating/replacing the file produces a reset.
+
+## Bounded console log viewer
+
+The Agent follows only `<data>\console.txt`; neither the browser nor an API request can select
+another path. It reads at most 16 KiB and 200 complete UTF-8 lines per check, no more often than
+once every five seconds, and detects truncation/replacement as a new stream. The API keeps only
+the latest 32 KiB / 400 lines, while the browser uses an opaque cursor for deltas or a bounded
+reset after reconnecting.
+
+Known password, token, secret, API-key and Authorization assignments are redacted on the Agent
+before transfer. This is a practical shield, not a guarantee for arbitrary mod-specific formats;
+do not write secrets to game logs. A missing, inaccessible, reparse-point or offline source is
+shown explicitly instead of being treated as an empty current log.
 
 ## Current limitations
 
 - Windows dedicated server only; Linux launch scripts are not supported.
 - Only the canonical `servertest` configuration is supported.
-- No custom JVM/game arguments, RCON, mod management, update automation or live log streaming.
+- No custom JVM/game arguments, RCON, mod management, update automation, archived-log browsing
+  or durable live-log retention.
 - Graceful console shutdown is available only while the Agent owns the launcher's standard
   input stream; an Agent restart loses that stream.
 - Vendor launcher/layout changes can require a profile update. The current assumptions were

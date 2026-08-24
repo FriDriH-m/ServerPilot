@@ -10,6 +10,9 @@ namespace ServerPilot.UnitTests.AgentLooping;
 
 public sealed class HttpAgentApiClientTests
 {
+    private const string LogSourceIdentifier =
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
     [Fact]
     public async Task SendsHeartbeatWithTheStoredAgentCredential()
     {
@@ -192,6 +195,7 @@ public sealed class HttpAgentApiClientTests
                         WorkingDirectory = @"C:\Servers\ProjectZomboid",
                         ProcessName = "java",
                         DataDirectory = @"C:\ServerPilotData\ProjectZomboid",
+                        LogSourceIdentifier,
                         ReportedStatus = "Running",
                         LastProcessId = 42,
                         LastProcessStartedAt = startedAt,
@@ -206,6 +210,7 @@ public sealed class HttpAgentApiClientTests
 
         Assert.Equal("ProjectZomboid", instance.Profile);
         Assert.Equal(LocalServerProfile.ProjectZomboid, instance.Identity?.Profile);
+        Assert.Equal(LogSourceIdentifier, instance.LogSourceIdentifier);
         Assert.Equal(
             @"C:\Servers\ProjectZomboid\jre64\bin\java.exe",
             instance.Identity?.ExecutablePath);
@@ -230,7 +235,15 @@ public sealed class HttpAgentApiClientTests
             serverInstanceId,
             AgentProcessStateReport.Running(
                 identity,
-                new ProcessMetricSample(12.5, 268_435_456, 900)),
+                new ProcessMetricSample(12.5, 268_435_456, 900),
+                new AgentServerLogReport(
+                    AgentServerLogStatus.Available,
+                    LogSourceIdentifier,
+                    Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                    0,
+                    6,
+                    true,
+                    "ready\n")),
             correlationId,
             CancellationToken.None);
 
@@ -245,6 +258,10 @@ public sealed class HttpAgentApiClientTests
         Assert.Equal(12.5, body.RootElement.GetProperty("cpuUsagePercent").GetDouble());
         Assert.Equal(268_435_456, body.RootElement.GetProperty("workingSetBytes").GetInt64());
         Assert.Equal(900, body.RootElement.GetProperty("uptimeSeconds").GetInt64());
+        JsonElement log = body.RootElement.GetProperty("log");
+        Assert.Equal("Available", log.GetProperty("status").GetString());
+        Assert.Equal(LogSourceIdentifier, log.GetProperty("sourceIdentifier").GetString());
+        Assert.Equal("ready\n", log.GetProperty("content").GetString());
     }
 
     [Fact]

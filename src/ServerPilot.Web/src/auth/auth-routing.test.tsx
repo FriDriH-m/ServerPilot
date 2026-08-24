@@ -22,6 +22,7 @@ function createManagementApi(): ManagementApi {
     listAgents: vi.fn().mockResolvedValue([]),
     listServerInstances: vi.fn().mockResolvedValue([]),
     getServerInstance: vi.fn(),
+    getServerLogs: vi.fn(),
     createServerInstance: vi.fn(),
     updateServerInstance: vi.fn(),
     deleteServerInstance: vi.fn(),

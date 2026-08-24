@@ -14,6 +14,7 @@ import type {
   ManagementApi,
   ServerCommand,
   ServerInstanceDetails,
+  ServerInstanceLogs,
 } from "../api/server-pilot-api";
 import { AppRoutes } from "../app";
 import { AuthProvider } from "../auth/auth-context";
@@ -57,6 +58,15 @@ const server: ServerInstanceDetails = {
   },
 };
 
+const serverLogs: ServerInstanceLogs = {
+  status: "Unsupported",
+  cursor: null,
+  reset: true,
+  lines: [],
+  reportedAt: null,
+  isStale: false,
+};
+
 function createSession(): AuthenticationSession {
   return {
     userId: "user-1",
@@ -73,6 +83,7 @@ function createManagementApi(
     listAgents: vi.fn().mockResolvedValue([agent]),
     listServerInstances: vi.fn().mockResolvedValue([server]),
     getServerInstance: vi.fn().mockResolvedValue(server),
+    getServerLogs: vi.fn().mockResolvedValue(serverLogs),
     createServerInstance: vi.fn().mockResolvedValue(server),
     updateServerInstance: vi.fn().mockResolvedValue(server),
     deleteServerInstance: vi.fn().mockResolvedValue(undefined),
@@ -321,17 +332,19 @@ describe("management dashboard", () => {
       await renderAuthenticated(api);
       await waitFor(() => {
         expect(api.getServerInstance).toHaveBeenCalledOnce();
+        expect(api.getServerLogs).toHaveBeenCalledOnce();
         expect(api.listServerCommands).toHaveBeenCalledOnce();
       });
       await waitFor(() => {
         const scheduledDelays = setTimeoutSpy.mock.calls.map((call) => call[1]);
         expect(scheduledDelays).toContain(15_000);
-        expect(scheduledDelays).toContain(10_000);
+        expect(scheduledDelays).toContain(12_000);
       });
 
       const intervalDelays = setIntervalSpy.mock.calls.map((call) => call[1]);
       expect(intervalDelays).not.toContain(5_000);
       expect(intervalDelays).not.toContain(10_000);
+      expect(intervalDelays).not.toContain(12_000);
       expect(intervalDelays).not.toContain(15_000);
     } finally {
       setIntervalSpy.mockRestore();
@@ -345,6 +358,7 @@ describe("management dashboard", () => {
       const listAgents = vi.fn().mockResolvedValue([agent]);
       const listServerInstances = vi.fn().mockResolvedValue([server]);
       const getServerInstance = vi.fn().mockResolvedValue(server);
+      const getServerLogs = vi.fn().mockResolvedValue(serverLogs);
       const listServerCommands = vi
         .fn()
         .mockResolvedValue({ items: [], nextCursor: null });
@@ -352,6 +366,7 @@ describe("management dashboard", () => {
         listAgents,
         listServerInstances,
         getServerInstance,
+        getServerLogs,
         listServerCommands,
       });
 
@@ -362,12 +377,14 @@ describe("management dashboard", () => {
 
       expect(listAgents).toHaveBeenCalledTimes(5);
       expect(listServerInstances).toHaveBeenCalledTimes(5);
-      expect(getServerInstance).toHaveBeenCalledTimes(7);
-      expect(listServerCommands).toHaveBeenCalledTimes(7);
+      expect(getServerInstance).toHaveBeenCalledTimes(6);
+      expect(getServerLogs).toHaveBeenCalledTimes(6);
+      expect(listServerCommands).toHaveBeenCalledTimes(6);
       expect(
         listAgents.mock.calls.length +
           listServerInstances.mock.calls.length +
           getServerInstance.mock.calls.length +
+          getServerLogs.mock.calls.length +
           listServerCommands.mock.calls.length,
       ).toBeLessThanOrEqual(30);
     } finally {

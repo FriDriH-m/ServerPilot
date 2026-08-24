@@ -1,3 +1,4 @@
+using System.Text;
 using ServerPilot.Domain.ServerInstances;
 
 namespace ServerPilot.UnitTests.ServerInstances;
@@ -339,6 +340,214 @@ public sealed class ServerInstanceTests
         Assert.Null(instance.LastMetricsReportedAt);
     }
 
+    [Fact]
+    public void ProjectZomboidLogsAppendIdempotentlyAndResetAfterRotation()
+    {
+        ServerInstance instance = ServerInstance.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            CreateProjectZomboidConfiguration(@"C:\Data\PZ"),
+            CreatedAt);
+        string source = ServerLogSourceIdentifier.Create(
+            instance.Profile,
+            instance.DataDirectory)!;
+        Guid stream = Guid.NewGuid();
+
+        ServerInstanceStateReportResult initial = instance.RecordProcessState(
+            ServerInstanceStatus.Stopped,
+            null,
+            null,
+            CreatedAt.AddSeconds(1),
+            logs: new ServerInstanceLogReport(
+                ServerInstanceLogStatus.Available,
+                source,
+                stream,
+                0,
+                6,
+                true,
+                "first\n"));
+        ServerInstanceStateReportResult append = instance.RecordProcessState(
+            ServerInstanceStatus.Stopped,
+            null,
+            null,
+            CreatedAt.AddSeconds(2),
+            logs: new ServerInstanceLogReport(
+                ServerInstanceLogStatus.Available,
+                source,
+                stream,
+                6,
+                13,
+                false,
+                "second\n"));
+        ServerInstanceStateReportResult retry = instance.RecordProcessState(
+            ServerInstanceStatus.Stopped,
+            null,
+            null,
+            CreatedAt.AddSeconds(3),
+            logs: new ServerInstanceLogReport(
+                ServerInstanceLogStatus.Available,
+                source,
+                stream,
+                6,
+                13,
+                false,
+                "second\n"));
+        Guid rotatedStream = Guid.NewGuid();
+        ServerInstanceStateReportResult rotated = instance.RecordProcessState(
+            ServerInstanceStatus.Stopped,
+            null,
+            null,
+            CreatedAt.AddSeconds(4),
+            logs: new ServerInstanceLogReport(
+                ServerInstanceLogStatus.Available,
+                source,
+                rotatedStream,
+                0,
+                8,
+                true,
+                "rotated\n"));
+
+        Assert.Equal(ServerInstanceStateReportResult.Succeeded, initial);
+        Assert.Equal(ServerInstanceStateReportResult.Succeeded, append);
+        Assert.Equal(ServerInstanceStateReportResult.Succeeded, retry);
+        Assert.Equal(ServerInstanceStateReportResult.Succeeded, rotated);
+        Assert.Equal("rotated\n", instance.LastLogContent);
+        Assert.Equal(rotatedStream, instance.LastLogStreamId);
+        Assert.Equal(8, instance.LastLogOffset);
+        Assert.True(instance.LastLogChunkReset);
+    }
+
+    [Fact]
+    public void ProjectZomboidLogsRejectWrongSourceGapsAndUnsafeContent()
+    {
+        ServerInstance instance = ServerInstance.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            CreateProjectZomboidConfiguration(@"C:\Data\PZ"),
+            CreatedAt);
+        string source = ServerLogSourceIdentifier.Create(
+            instance.Profile,
+            instance.DataDirectory)!;
+        Guid stream = Guid.NewGuid();
+
+        Assert.Equal(
+            ServerInstanceStateReportResult.InvalidLogs,
+            instance.RecordProcessState(
+                ServerInstanceStatus.Stopped,
+                null,
+                null,
+                CreatedAt.AddSeconds(1),
+                logs: new ServerInstanceLogReport(
+                    ServerInstanceLogStatus.Available,
+                    new string('A', ServerLogSourceIdentifier.Length),
+                    stream,
+                    0,
+                    4,
+                    true,
+                    "one\n")));
+
+        instance.RecordProcessState(
+            ServerInstanceStatus.Stopped,
+            null,
+            null,
+            CreatedAt.AddSeconds(2),
+            logs: new ServerInstanceLogReport(
+                ServerInstanceLogStatus.Available,
+                source,
+                stream,
+                0,
+                4,
+                true,
+                "one\n"));
+
+        Assert.Equal(
+            ServerInstanceStateReportResult.InvalidLogs,
+            instance.RecordProcessState(
+                ServerInstanceStatus.Stopped,
+                null,
+                null,
+                CreatedAt.AddSeconds(3),
+                logs: new ServerInstanceLogReport(
+                    ServerInstanceLogStatus.Available,
+                    source,
+                    stream,
+                    9,
+                    13,
+                    false,
+                    "gap\n")));
+        Assert.Equal(
+            ServerInstanceStateReportResult.InvalidLogs,
+            instance.RecordProcessState(
+                ServerInstanceStatus.Stopped,
+                null,
+                null,
+                CreatedAt.AddSeconds(4),
+                logs: new ServerInstanceLogReport(
+                    ServerInstanceLogStatus.Available,
+                    source,
+                    stream,
+                    4,
+                    9,
+                    false,
+                    "bad\u001b\n")));
+        Assert.Equal("one\n", instance.LastLogContent);
+    }
+
+    [Fact]
+    public void ProjectZomboidLogWindowIsBoundedAndConfigurationChangeClearsIt()
+    {
+        ServerInstance instance = ServerInstance.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            CreateProjectZomboidConfiguration(@"C:\Data\PZ"),
+            CreatedAt);
+        string source = ServerLogSourceIdentifier.Create(
+            instance.Profile,
+            instance.DataDirectory)!;
+        Guid stream = Guid.NewGuid();
+        long offset = 0;
+
+        for (int chunk = 0; chunk < 3; chunk++)
+        {
+            string content = string.Concat(
+                Enumerable.Range(chunk * 200, 200)
+                    .Select(index => $"line-{index:D4}-payload\n"));
+            long nextOffset = offset + Encoding.UTF8.GetByteCount(content);
+            ServerInstanceStateReportResult result = instance.RecordProcessState(
+                ServerInstanceStatus.Stopped,
+                null,
+                null,
+                CreatedAt.AddSeconds(chunk + 1),
+                logs: new ServerInstanceLogReport(
+                    ServerInstanceLogStatus.Available,
+                    source,
+                    stream,
+                    offset,
+                    nextOffset,
+                    chunk == 0,
+                    content));
+            Assert.Equal(ServerInstanceStateReportResult.Succeeded, result);
+            offset = nextOffset;
+        }
+
+        Assert.True(
+            Encoding.UTF8.GetByteCount(instance.LastLogContent!) <=
+            ServerInstanceLogReport.MaximumWindowBytes);
+        Assert.True(
+            instance.LastLogContent!.Count(character => character == '\n') <=
+            ServerInstanceLogReport.MaximumWindowLines);
+        Assert.True(instance.LastLogChunkReset);
+
+        instance.UpdateConfiguration(
+            CreateProjectZomboidConfiguration(@"C:\Data\PZ2"),
+            CreatedAt.AddMinutes(1));
+
+        Assert.Null(instance.LastLogStatus);
+        Assert.Null(instance.LastLogContent);
+        Assert.Null(instance.LastLogStreamId);
+        Assert.Null(instance.LastLogReportedAt);
+    }
+
     private static ServerInstanceConfiguration CreateConfiguration(string name)
     {
         bool created = ServerInstanceConfiguration.TryCreate(
@@ -347,6 +556,23 @@ public sealed class ServerInstanceTests
             string.Empty,
             "C:\\Servers",
             "server.exe",
+            out ServerInstanceConfiguration? configuration);
+
+        Assert.True(created);
+        return Assert.IsType<ServerInstanceConfiguration>(configuration);
+    }
+
+    private static ServerInstanceConfiguration CreateProjectZomboidConfiguration(
+        string dataDirectory)
+    {
+        bool created = ServerInstanceConfiguration.TryCreate(
+            ServerInstanceProfile.ProjectZomboid,
+            "Project Zomboid",
+            @"C:\Servers\PZ\StartServer64.bat",
+            string.Empty,
+            @"C:\Servers\PZ",
+            "java",
+            dataDirectory,
             out ServerInstanceConfiguration? configuration);
 
         Assert.True(created);

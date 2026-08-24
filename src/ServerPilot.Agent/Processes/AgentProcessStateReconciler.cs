@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using ServerPilot.Agent.Api;
 using ServerPilot.Agent.Credentials;
+using ServerPilot.Agent.Logs;
 using ServerPilot.Agent.Looping;
 
 namespace ServerPilot.Agent.Processes;
@@ -17,6 +18,7 @@ public sealed class AgentProcessStateReconciler(
     AgentRetryExecutor retry,
     IProcessSupervisorRegistry supervisors,
     ProcessMetricsSampler metricsSampler,
+    IServerLogTailReader logTailReader,
     ILogger<AgentProcessStateReconciler> logger) : IAgentProcessStateReconciler
 {
     private static readonly Action<ILogger, Guid, Guid, string, int?, Exception?>
@@ -38,7 +40,9 @@ public sealed class AgentProcessStateReconciler(
         IReadOnlyList<AssignedAgentServerInstance> instances = await retry.ExecuteAsync(
             token => apiClient.ListServerInstancesAsync(credential, token),
             cancellationToken);
-        metricsSampler.Retain(instances.Select(instance => instance.Id).ToHashSet());
+        HashSet<Guid> assignedIds = instances.Select(instance => instance.Id).ToHashSet();
+        metricsSampler.Retain(assignedIds);
+        logTailReader.Retain(assignedIds);
 
         foreach (AssignedAgentServerInstance instance in instances)
         {
@@ -65,7 +69,7 @@ public sealed class AgentProcessStateReconciler(
 
             ProcessSupervisorResult inspection = await resolution.Supervisor.InspectAsync(
                 cancellationToken);
-            AgentProcessStateReport? report = CreateReport(instance, inspection);
+            AgentProcessStateReport? report = CreateReport(instance, inspection, log: null);
             if (report is null)
             {
                 LogInspectionSkipped(
@@ -75,6 +79,16 @@ public sealed class AgentProcessStateReconciler(
                     inspection.Failure.ToString(),
                     null);
                 continue;
+            }
+
+            ServerLogSource? logSource = ServerLogSource.Create(instance);
+            if (logSource is not null)
+            {
+                AgentServerLogReport? log = await logTailReader.ReadAsync(
+                    instance.Id,
+                    logSource,
+                    cancellationToken);
+                report = report with { Log = log };
             }
 
             await retry.ExecuteAsync(
@@ -96,31 +110,34 @@ public sealed class AgentProcessStateReconciler(
 
     private AgentProcessStateReport? CreateReport(
         AssignedAgentServerInstance instance,
-        ProcessSupervisorResult inspection) => inspection.Status switch
+        ProcessSupervisorResult inspection,
+        AgentServerLogReport? log) => inspection.Status switch
         {
             ProcessSupervisorStatus.Running when inspection.Identity is not null &&
                 inspection.Snapshot is not null =>
                 AgentProcessStateReport.Running(
                     inspection.Identity,
-                    metricsSampler.Capture(instance.Id, inspection.Snapshot)),
+                    metricsSampler.Capture(instance.Id, inspection.Snapshot),
+                    log),
             ProcessSupervisorStatus.NotRunning or ProcessSupervisorStatus.AlreadyStopped =>
-                MissingProcessReport(instance.Id, instance.ReportedStatus),
+                MissingProcessReport(instance.Id, instance.ReportedStatus, log),
             ProcessSupervisorStatus.StaleProcessId =>
-                MissingProcessReport(instance.Id, instance.ReportedStatus),
+                MissingProcessReport(instance.Id, instance.ReportedStatus, log),
             _ => null,
         };
 
     private AgentProcessStateReport MissingProcessReport(
         Guid serverInstanceId,
-        AgentServerInstanceStatus previousStatus)
+        AgentServerInstanceStatus previousStatus,
+        AgentServerLogReport? log)
     {
         metricsSampler.Reset(serverInstanceId);
         return previousStatus switch
         {
             AgentServerInstanceStatus.Running or AgentServerInstanceStatus.Starting =>
-                AgentProcessStateReport.Crashed(),
-            AgentServerInstanceStatus.Crashed => AgentProcessStateReport.Crashed(),
-            _ => AgentProcessStateReport.Stopped(),
+                AgentProcessStateReport.Crashed(log),
+            AgentServerInstanceStatus.Crashed => AgentProcessStateReport.Crashed(log),
+            _ => AgentProcessStateReport.Stopped(log),
         };
     }
 }

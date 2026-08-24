@@ -863,6 +863,14 @@ CPU, working set и uptime; PostgreSQL хранит только последн�
 держит не более 30 последних точек в памяти для короткого CPU-графика. Durable metric history,
 Prometheus, alerts и cross-server dashboards остаются отложены.
 
+Post-MVP issue #40 добавляет bounded live-log view для канонического Project Zomboid
+`<data>\console.txt`. Browser не передаёт путь; Agent выводит его из проверенного профиля,
+читает только полные UTF-8 строки с fixed byte/line limits, отслеживает rotation cursor и
+скрывает известные secret assignments до отправки. PostgreSQL сохраняет только последнее
+32 KiB/400-line окно и один delta, а owner-only Web viewer поддерживает reconnect reset,
+pause/resume, локальный filter и stale/offline states. Generic log paths, archives, durable
+history, indexing и Loki остаются отложены.
+
 ### Этап 7. Асинхронное взаимодействие
 
 - RabbitMQ;

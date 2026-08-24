@@ -20,6 +20,8 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
         "ck_server_instances_trimmed_configuration";
     internal const string ValidMetricsConstraintName =
         "ck_server_instances_valid_metrics";
+    internal const string ValidLogsConstraintName =
+        "ck_server_instances_valid_logs";
 
     public void Configure(EntityTypeBuilder<ServerInstance> builder)
     {
@@ -40,7 +42,10 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
                     "updated_at >= created_at AND " +
                     "(last_status_reported_at IS NULL OR " +
                     "(last_status_reported_at >= created_at AND " +
-                    "last_status_reported_at <= updated_at))");
+                    "last_status_reported_at <= updated_at)) AND " +
+                    "(last_log_reported_at IS NULL OR " +
+                    "(last_log_reported_at >= created_at AND " +
+                    "last_log_reported_at <= updated_at))");
                 tableBuilder.HasCheckConstraint(
                     TrimmedConfigurationConstraintName,
                     "profile IN (0, 1) AND " +
@@ -63,6 +68,24 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
                     "(last_cpu_usage_percent IS NULL OR " +
                     "last_cpu_usage_percent BETWEEN 0 AND 100) AND " +
                     "last_working_set_bytes >= 0 AND last_uptime_seconds >= 0)");
+                tableBuilder.HasCheckConstraint(
+                    ValidLogsConstraintName,
+                    "(last_log_status IS NULL AND last_log_reported_at IS NULL AND " +
+                    "last_log_content IS NULL AND last_log_stream_id IS NULL AND " +
+                    "last_log_offset IS NULL AND last_log_chunk_content IS NULL AND " +
+                    "last_log_chunk_from_offset IS NULL AND NOT last_log_chunk_reset) OR " +
+                    "(last_log_status IN (1, 2, 3) AND last_log_reported_at IS NOT NULL AND " +
+                    "((last_log_status IN (2, 3) AND last_log_stream_id IS NULL AND " +
+                    "last_log_offset IS NULL AND last_log_content IS NULL AND " +
+                    "last_log_chunk_content IS NULL AND last_log_chunk_from_offset IS NULL AND " +
+                    "NOT last_log_chunk_reset) OR " +
+                    "(last_log_stream_id IS NOT NULL AND last_log_offset >= 0 AND " +
+                    "last_log_content IS NOT NULL AND " +
+                    $"octet_length(last_log_content) <= {ServerInstanceLogReport.MaximumWindowBytes} AND " +
+                    "last_log_chunk_content IS NOT NULL AND " +
+                    $"octet_length(last_log_chunk_content) <= {ServerInstanceLogReport.MaximumWindowBytes} AND " +
+                    "last_log_chunk_from_offset >= 0 AND " +
+                    "last_log_chunk_from_offset <= last_log_offset)))");
             });
         builder.HasKey(serverInstance => serverInstance.Id)
             .HasName("pk_server_instances");
@@ -124,6 +147,27 @@ internal sealed class ServerInstanceConfiguration : IEntityTypeConfiguration<Ser
             .HasColumnName("last_uptime_seconds");
         builder.Property(serverInstance => serverInstance.LastMetricsReportedAt)
             .HasColumnName("last_metrics_reported_at")
+            .HasColumnType("timestamp with time zone");
+        builder.Property(serverInstance => serverInstance.LastLogStatus)
+            .HasColumnName("last_log_status")
+            .HasConversion<int?>();
+        builder.Property(serverInstance => serverInstance.LastLogContent)
+            .HasColumnName("last_log_content")
+            .HasColumnType("text");
+        builder.Property(serverInstance => serverInstance.LastLogStreamId)
+            .HasColumnName("last_log_stream_id");
+        builder.Property(serverInstance => serverInstance.LastLogOffset)
+            .HasColumnName("last_log_offset");
+        builder.Property(serverInstance => serverInstance.LastLogChunkContent)
+            .HasColumnName("last_log_chunk_content")
+            .HasColumnType("text");
+        builder.Property(serverInstance => serverInstance.LastLogChunkFromOffset)
+            .HasColumnName("last_log_chunk_from_offset");
+        builder.Property(serverInstance => serverInstance.LastLogChunkReset)
+            .HasColumnName("last_log_chunk_reset")
+            .IsRequired();
+        builder.Property(serverInstance => serverInstance.LastLogReportedAt)
+            .HasColumnName("last_log_reported_at")
             .HasColumnType("timestamp with time zone");
         builder.Property(serverInstance => serverInstance.CreatedAt)
             .HasColumnName("created_at")

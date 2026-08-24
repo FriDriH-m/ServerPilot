@@ -230,6 +230,7 @@ API
 - [`docs/adr/0013-windows-service-agent-delivery.md`](docs/adr/0013-windows-service-agent-delivery.md) — решение по service identity, DPAPI/ACL, доставке и recovery Windows Agent.
 - [`docs/adr/0014-project-zomboid-process-profile.md`](docs/adr/0014-project-zomboid-process-profile.md) — решение по ограниченному batch-to-Java профилю Project Zomboid.
 - [`docs/adr/0015-bounded-process-metrics.md`](docs/adr/0015-bounded-process-metrics.md) — решение по bounded-сбору CPU/RAM/uptime, latest-snapshot persistence и transient Web history.
+- [`docs/adr/0016-bounded-project-zomboid-log-tailing.md`](docs/adr/0016-bounded-project-zomboid-log-tailing.md) — решение по безопасному bounded tail `console.txt`, cursor/retry/rotation semantics и owner-only Web viewer.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -332,13 +333,18 @@ JWT хранится только в памяти вкладки: logout, expiry
 `StartServer`/`StopServer` и просматривать cursor-based историю команд. Agents и
 ServerInstances отображаются отдельными страницами максимум по 100 элементов; полная
 страница предлагает следующую, чтобы UI не выдавал частичный список за полный набор.
-Списки обновляются последовательно каждые 15 секунд, а состояние выбранного процесса и
-первая страница истории — каждые 10 секунд. Такая частота даёт максимум 24
+Списки обновляются последовательно каждые 15 секунд, а состояние выбранного процесса,
+первая страница истории и bounded log view — каждые 12 секунд. Такая частота даёт максимум 28
 authenticated-user запроса в первую минуту при стандартном лимите 30 и не запускает
 новый цикл до завершения предыдущего. Новый список отменяет предыдущий запрос, а
 устаревший ответ игнорируется. Принятая API команда
 отображается как queued/pending и не считается доказательством запуска или остановки:
 фактический status и PID меняются только после нового отчёта Agent.
+
+Для Project Zomboid dashboard показывает только профильный `<data>\console.txt`: браузер
+не отправляет путь. Viewer хранит не более 400 строк, умеет pause/resume и локальную
+фильтрацию, показывает missing/unavailable/offline и после пропущенного cursor получает
+bounded reset. Generic-профиль пока явно не имеет log source.
 
 Проверка форматирования:
 
@@ -495,6 +501,12 @@ Command polling не начинается до первой успешной с�
 первом отчёте CPU отсутствует. Интервал `Agent__ProcessReconciliationIntervalSeconds`
 одновременно задаёт cadence метрик; цикл не перекрывается и при медленном API не накапливает
 запросы.
+
+В том же последовательном reconciliation Agent читает только канонический Project Zomboid
+`<data>\console.txt`. Чтение ограничено 16 KiB/200 полными UTF-8 строками и не выполняется
+чаще одного раза в пять секунд; rotation/truncation меняет stream cursor. До отправки Agent
+удаляет terminal control sequences и скрывает известные password/token/secret/API-key/
+Authorization values. API под тем же row lock хранит только 32 KiB/400 последних строк.
 
 ### Безопасный process supervisor Agent
 
@@ -699,7 +711,11 @@ Issue #38 добавляет ограниченный профиль Project Zom
 отдельный cachedir, проверку bundled Java/configuration, отслеживание реального Java PID,
 restart rediscovery и остановку через `save`/`quit` с ограниченным forced fallback. Generic
 `.exe`-профиль остаётся без изменений; custom server names/arguments, RCON, mod management и
-live log streaming отложены. Issue #39 добавляет owner-scoped CPU/RAM/uptime для управляемого
+live log streaming было отложено до отдельного bounded slice. Issue #39 добавляет owner-scoped CPU/RAM/uptime для управляемого
 процесса: Agent использует существующую reconciliation cadence, PostgreSQL хранит только
 последний снимок, а Web — до 30 transient точек текущей вкладки. Prometheus, durable metric
 history и alerts остаются задачами отдельного этапа наблюдаемости.
+Issue #40 добавляет bounded просмотр Project Zomboid `console.txt`: путь определяется только
+профилем, Agent отправляет incremental cursor chunks, PostgreSQL и Web удерживают фиксированное
+последнее окно, а viewer поддерживает reconnect reset, pause/resume, filter и stale состояния.
+Arbitrary files, durable log history и Loki остаются вне этой задачи.

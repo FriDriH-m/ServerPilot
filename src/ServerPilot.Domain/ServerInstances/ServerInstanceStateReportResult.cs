@@ -7,5 +7,6 @@ public enum ServerInstanceStateReportResult
     InvalidState,
     InvalidProcessIdentity,
     InvalidMetrics,
+    InvalidLogs,
     StaleReport,
 }

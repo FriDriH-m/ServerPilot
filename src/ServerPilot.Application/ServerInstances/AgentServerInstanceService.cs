@@ -6,7 +6,7 @@ public sealed class AgentServerInstanceService(
     IServerInstanceRepository serverInstances,
     TimeProvider timeProvider)
 {
-    public Task<IReadOnlyList<AssignedServerInstanceDetails>> ListAsync(
+    public async Task<IReadOnlyList<AssignedServerInstanceDetails>> ListAsync(
         Guid agentId,
         int page,
         int limit,
@@ -23,11 +23,20 @@ public sealed class AgentServerInstanceService(
             throw new ArgumentOutOfRangeException(nameof(page));
         }
 
-        return serverInstances.ListAssignedAsync(
+        IReadOnlyList<AssignedServerInstanceDetails> assigned =
+            await serverInstances.ListAssignedAsync(
             agentId,
             (page - 1) * limit,
             limit,
             cancellationToken);
+        return assigned
+            .Select(item => item with
+            {
+                LogSourceIdentifier = ServerLogSourceIdentifier.Create(
+                    item.Profile,
+                    item.DataDirectory),
+            })
+            .ToArray();
     }
 
     public Task<ServerInstanceStateReportResult> ReportAsync(
@@ -37,6 +46,7 @@ public sealed class AgentServerInstanceService(
         int? processId,
         DateTimeOffset? processStartedAt,
         ServerInstanceMetricReport? metrics,
+        ServerInstanceLogReport? logs,
         CancellationToken cancellationToken)
     {
         ValidateAgentId(agentId);
@@ -53,6 +63,7 @@ public sealed class AgentServerInstanceService(
             processStartedAt,
             timeProvider.GetUtcNow(),
             metrics,
+            logs,
             cancellationToken);
     }
 

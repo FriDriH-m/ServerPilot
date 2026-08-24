@@ -64,7 +64,8 @@ public sealed class AgentServerInstancesController(
             item.ReportedStatus.ToString(),
             item.LastProcessId,
             item.LastProcessStartedAt,
-            item.LastStatusReportedAt)).ToArray());
+            item.LastStatusReportedAt,
+            item.LogSourceIdentifier)).ToArray());
     }
 
     [HttpPost("{serverInstanceId:guid}/status")]
@@ -103,6 +104,29 @@ public sealed class AgentServerInstancesController(
                 request.UptimeSeconds!.Value)
             : null;
 
+        ServerInstanceLogReport? logs = null;
+        if (request.Log is not null)
+        {
+            if (!Enum.TryParse(
+                    request.Log.Status,
+                    ignoreCase: false,
+                    out ServerInstanceLogStatus logStatus) ||
+                !Enum.IsDefined(logStatus) ||
+                string.IsNullOrWhiteSpace(request.Log.SourceIdentifier))
+            {
+                return InvalidReport();
+            }
+
+            logs = new ServerInstanceLogReport(
+                logStatus,
+                request.Log.SourceIdentifier,
+                request.Log.StreamId,
+                request.Log.FromOffset,
+                request.Log.ToOffset,
+                request.Log.Reset,
+                request.Log.Content);
+        }
+
         StateReportResult result = await serverInstances.ReportAsync(
             agentId,
             serverInstanceId,
@@ -110,6 +134,7 @@ public sealed class AgentServerInstancesController(
             request.ProcessId,
             request.ProcessStartedAt,
             metrics,
+            logs,
             cancellationToken);
         if (result is StateReportResult.Succeeded or StateReportResult.AlreadyApplied)
         {
@@ -124,7 +149,8 @@ public sealed class AgentServerInstancesController(
 
         LogRejectedStateReport(logger, agentId, serverInstanceId, null);
         return result is StateReportResult.InvalidProcessIdentity or
-            StateReportResult.InvalidMetrics
+            StateReportResult.InvalidMetrics or
+            StateReportResult.InvalidLogs
             ? InvalidReport()
             : Problem(
                 statusCode: StatusCodes.Status409Conflict,
@@ -154,5 +180,5 @@ public sealed class AgentServerInstancesController(
     private ObjectResult InvalidReport() => Problem(
         statusCode: StatusCodes.Status400BadRequest,
         title: "Invalid process-state report",
-        detail: "Running requires a positive PID and process start time. Metrics require bounded CPU, non-negative working-set and uptime values. Stopped and Crashed require neither identity nor metrics.");
+        detail: "Running requires a positive PID and process start time. Metrics and logs must satisfy their bounded contracts. Stopped and Crashed require no process identity or metrics.");
 }

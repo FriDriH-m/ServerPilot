@@ -445,6 +445,12 @@ issue #39 расширяет `Running` report bounded CPU/RAM/uptime snapshot: A
 своё receipt time, PostgreSQL хранит последнее измерение, а owner details помечает его stale
 вместе с offline/effective-state semantics. Это не добавляет durable metric history в MVP.
 
+Post-MVP issue #40 дополнительно использует тот же последовательный report для bounded
+Project Zomboid `console.txt` chunks. Allowed path выводится только из stored profile/data
+directory, API сверяет opaque source identifier и cursor под тем же row lock, а PostgreSQL
+хранит лишь последнее 32 KiB/400-line окно. Owner Web API не принимает путь и не превращает
+эту post-MVP функцию в arbitrary file browser или durable log retention внутри MVP.
+
 `claim-next` доступен только Agent credential, чей Agent ID точно совпадает с маршрутом.
 Он блокирует строку Agent на время короткого PostgreSQL statement. Уже назначенная этому
 Agent команда в `Claimed` или `Running` выдаётся повторно как `Recovery`; только при её
@@ -481,6 +487,8 @@ Agent команда в `Claimed` или `Running` выдаётся повтор
 - создание ServerInstance;
 - Agent-scoped list/status report, persisted PID/start time и защита чужого Agent;
 - latest CPU/RAM/uptime snapshot, invalid-bound rejection и owner-only stale view;
+- bounded Project Zomboid log chunks, invalid source/cursor rejection, rotation reset и
+  owner-only stale view;
 - effective `Unreachable` при offline Agent без потери last reported state;
 - запрет доступа к чужому Agent;
 - создание команды запуска;
