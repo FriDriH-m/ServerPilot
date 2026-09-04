@@ -88,7 +88,8 @@ public sealed partial class BoundedServerLogTailReader(TimeProvider timeProvider
                     previous.SourceIdentifier,
                     source.Identifier,
                     StringComparison.Ordinal) ||
-                previous.CreationTimeUtc != creationTimeUtc ||
+                (previous.CreationTimeUtc != creationTimeUtc &&
+                 length == previous.Offset) ||
                 length < previous.Offset ||
                 (previous.PrefixFingerprint is not null &&
                  prefixFingerprint is not null &&
