@@ -3,9 +3,11 @@ import type {
   ServerCommand,
   ServerInstanceDetails,
   ServerInstanceMetrics,
+  ServerInstanceLogs,
 } from "../api/server-pilot-api";
 import {
   appendMetricSample,
+  applyServerLogUpdate,
   formatMemory,
   formatUptime,
   getCommandAvailability,
@@ -113,5 +115,37 @@ describe("process metrics", () => {
     expect(formatMemory(268_435_456)).toBe("256.0 MiB");
     expect(formatUptime(900)).toBe("15m");
     expect(formatUptime(90_000)).toBe("1d 1h");
+  });
+});
+
+describe("server logs", () => {
+  it("applies deltas, bounds browser memory and replaces on reset", () => {
+    const initial: ServerInstanceLogs = {
+      status: "Available",
+      cursor: "stream:2",
+      reset: true,
+      lines: ["one", "two"],
+      reportedAt: "2026-08-24T12:00:00Z",
+      isStale: false,
+    };
+    const delta: ServerInstanceLogs = {
+      ...initial,
+      cursor: "stream:4",
+      reset: false,
+      lines: ["three", "four"],
+    };
+    const rotated: ServerInstanceLogs = {
+      ...initial,
+      cursor: "rotated:1",
+      reset: true,
+      lines: ["new"],
+    };
+
+    const first = applyServerLogUpdate(null, initial, 3);
+    const appended = applyServerLogUpdate(first, delta, 3);
+    const reset = applyServerLogUpdate(appended, rotated, 3);
+
+    expect(appended.lines).toEqual(["two", "three", "four"]);
+    expect(reset.lines).toEqual(["new"]);
   });
 });

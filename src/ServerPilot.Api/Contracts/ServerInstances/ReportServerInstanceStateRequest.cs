@@ -13,4 +13,6 @@ public sealed class ReportServerInstanceStateRequest
     public long? WorkingSetBytes { get; init; }
 
     public long? UptimeSeconds { get; init; }
+
+    public ReportServerInstanceLogRequest? Log { get; init; }
 }

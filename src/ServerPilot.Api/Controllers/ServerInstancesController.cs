@@ -151,6 +151,45 @@ public sealed class ServerInstancesController(
         return Ok(ToResponse(serverInstance));
     }
 
+    [HttpGet("{id:guid}/logs")]
+    public async Task<ActionResult<ServerInstanceLogsResponse>> GetLogs(
+        Guid id,
+        CancellationToken cancellationToken,
+        [FromQuery] string? cursor = null)
+    {
+        if (currentUser.UserId is not Guid userId)
+        {
+            return Unauthorized();
+        }
+
+        if (!ServerInstanceLogCursor.TryParse(cursor, out ServerInstanceLogCursor? parsedCursor))
+        {
+            return Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Invalid log cursor",
+                detail: "The log cursor is malformed.");
+        }
+
+        ServerInstanceLogView? logs = await serverInstances.GetLogsAsync(
+            id,
+            userId,
+            parsedCursor,
+            cancellationToken);
+        if (logs is null)
+        {
+            LogServerInstanceNotFound(logger, userId, id, null);
+            return NotFound();
+        }
+
+        return Ok(new ServerInstanceLogsResponse(
+            logs.Status.ToString(),
+            logs.Cursor,
+            logs.Reset,
+            logs.Lines,
+            logs.ReportedAt,
+            logs.IsStale));
+    }
+
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<ServerInstanceResponse>> Update(
         Guid id,

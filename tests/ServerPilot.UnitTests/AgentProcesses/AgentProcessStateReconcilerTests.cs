@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using ServerPilot.Agent.Api;
 using ServerPilot.Agent.Credentials;
+using ServerPilot.Agent.Logs;
 using ServerPilot.Agent.Looping;
 using ServerPilot.Agent.Processes;
 
@@ -53,40 +54,80 @@ public sealed class AgentProcessStateReconcilerTests
     [Fact]
     public async Task InspectionFailureDoesNotFabricateStoppedState()
     {
-        RecordingApiClient apiClient = new(CreateAssignment(AgentServerInstanceStatus.Running));
+        RecordingApiClient apiClient = new(CreateAssignment(
+            AgentServerInstanceStatus.Running,
+            projectZomboid: true));
         RecordingRegistry registry = new(
             new FakeSupervisor(new ProcessSupervisorResult(
                 ProcessSupervisorStatus.Failed,
                 Identity,
                 ProcessSupervisorFailure.AccessDenied)));
-        AgentProcessStateReconciler reconciler = CreateReconciler(apiClient, registry);
+        RecordingLogTailReader logTailReader = new();
+        AgentProcessStateReconciler reconciler = CreateReconciler(
+            apiClient,
+            registry,
+            logTailReader);
 
         await reconciler.ReconcileAsync(CreateCredential(), CancellationToken.None);
 
         Assert.Null(apiClient.Report);
+        Assert.Equal(0, logTailReader.ReadCount);
+    }
+
+    [Fact]
+    public async Task SuccessfulInspectionReadsAndReportsConfiguredLog()
+    {
+        RecordingApiClient apiClient = new(CreateAssignment(
+            AgentServerInstanceStatus.Stopped,
+            projectZomboid: true));
+        RecordingRegistry registry = new(
+            new FakeSupervisor(new ProcessSupervisorResult(
+                ProcessSupervisorStatus.NotRunning)));
+        AgentServerLogReport expectedLog = new(
+            AgentServerLogStatus.Missing,
+            new string('A', 64),
+            null,
+            null,
+            null,
+            false,
+            null);
+        RecordingLogTailReader logTailReader = new(expectedLog);
+        AgentProcessStateReconciler reconciler = CreateReconciler(
+            apiClient,
+            registry,
+            logTailReader);
+
+        await reconciler.ReconcileAsync(CreateCredential(), CancellationToken.None);
+
+        Assert.Equal(1, logTailReader.ReadCount);
+        Assert.Equal(expectedLog, apiClient.Report?.Log);
     }
 
     private static AgentProcessStateReconciler CreateReconciler(
         RecordingApiClient apiClient,
-        RecordingRegistry registry) => new(
+        RecordingRegistry registry,
+        IServerLogTailReader? logTailReader = null) => new(
             apiClient,
             new AgentRetryExecutor(new ImmediateDelay()),
             registry,
             new ProcessMetricsSampler(TimeProvider.System),
+            logTailReader ?? new EmptyLogTailReader(),
             NullLogger<AgentProcessStateReconciler>.Instance);
 
     private static AssignedAgentServerInstance CreateAssignment(
-        AgentServerInstanceStatus status) => new(
+        AgentServerInstanceStatus status,
+        bool projectZomboid = false) => new(
             Guid.NewGuid(),
-            "Generic",
+            projectZomboid ? "ProjectZomboid" : "Generic",
             Identity.ExecutablePath,
             string.Empty,
             @"C:\Servers",
             Identity.ProcessName,
-            null,
+            projectZomboid ? @"C:\Zomboid" : null,
             status,
             status == AgentServerInstanceStatus.Running ? Identity : null,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            projectZomboid ? new string('A', 64) : null);
 
     private static AgentCredential CreateCredential() => AgentCredential.Create(
         Guid.NewGuid(),
@@ -178,5 +219,37 @@ public sealed class AgentProcessStateReconcilerTests
     {
         public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
             Task.CompletedTask;
+    }
+
+    private sealed class EmptyLogTailReader : IServerLogTailReader
+    {
+        public Task<AgentServerLogReport?> ReadAsync(
+            Guid serverInstanceId,
+            ServerLogSource source,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<AgentServerLogReport?>(null);
+
+        public void Retain(IReadOnlySet<Guid> serverInstanceIds)
+        {
+        }
+    }
+
+    private sealed class RecordingLogTailReader(AgentServerLogReport? report = null)
+        : IServerLogTailReader
+    {
+        public int ReadCount { get; private set; }
+
+        public Task<AgentServerLogReport?> ReadAsync(
+            Guid serverInstanceId,
+            ServerLogSource source,
+            CancellationToken cancellationToken)
+        {
+            ReadCount++;
+            return Task.FromResult(report);
+        }
+
+        public void Retain(IReadOnlySet<Guid> serverInstanceIds)
+        {
+        }
     }
 }

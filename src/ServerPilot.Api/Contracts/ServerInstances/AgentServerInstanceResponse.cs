@@ -11,4 +11,5 @@ public sealed record AgentServerInstanceResponse(
     string ReportedStatus,
     int? LastProcessId,
     DateTimeOffset? LastProcessStartedAt,
-    DateTimeOffset? LastStatusReportedAt);
+    DateTimeOffset? LastStatusReportedAt,
+    string? LogSourceIdentifier);

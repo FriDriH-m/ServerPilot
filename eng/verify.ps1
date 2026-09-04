@@ -13,6 +13,23 @@ function Assert-NativeCommandSucceeded {
     }
 }
 
+function Invoke-NpmAudit {
+    $maximumAttempts = 3
+    for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++) {
+        npm audit --audit-level=high --fetch-timeout=30000
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+
+        if ($attempt -eq $maximumAttempts) {
+            throw "Command 'npm audit' failed after $maximumAttempts attempts with exit code $LASTEXITCODE."
+        }
+
+        Write-Warning "npm audit failed on attempt $attempt of $maximumAttempts; retrying."
+        Start-Sleep -Seconds ($attempt * 5)
+    }
+}
+
 docker info
 Assert-NativeCommandSucceeded "docker info"
 
@@ -38,8 +55,7 @@ try {
     npm ci
     Assert-NativeCommandSucceeded "npm ci"
 
-    npm audit --audit-level=high
-    Assert-NativeCommandSucceeded "npm audit"
+    Invoke-NpmAudit
 
     npm test
     Assert-NativeCommandSucceeded "npm test"

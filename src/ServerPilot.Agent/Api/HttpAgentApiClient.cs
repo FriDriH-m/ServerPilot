@@ -112,6 +112,18 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
             CpuUsagePercent = report.Metrics?.CpuUsagePercent,
             WorkingSetBytes = report.Metrics?.WorkingSetBytes,
             UptimeSeconds = report.Metrics?.UptimeSeconds,
+            Log = report.Log is null
+                ? null
+                : new
+                {
+                    Status = report.Log.Status.ToString(),
+                    report.Log.SourceIdentifier,
+                    report.Log.StreamId,
+                    report.Log.FromOffset,
+                    report.Log.ToOffset,
+                    report.Log.Reset,
+                    report.Log.Content,
+                },
         });
         using HttpResponseMessage response = await httpClient.SendAsync(request, cancellationToken);
         EnsureStatus(response, HttpStatusCode.NoContent);
@@ -308,6 +320,16 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
                 AgentApiFailureKind.Configuration);
         }
 
+        bool supportsLogs = configuration.Configuration.Profile ==
+            LocalServerProfile.ProjectZomboid;
+        if ((supportsLogs && !IsValidLogSourceIdentifier(response.LogSourceIdentifier)) ||
+            (!supportsLogs && response.LogSourceIdentifier is not null))
+        {
+            throw new AgentApiException(
+                "Agent ServerInstance response has an invalid log source identifier.",
+                AgentApiFailureKind.Configuration);
+        }
+
         bool validRunningIdentity = response.LastProcessId is > 0 &&
             response.LastProcessStartedAt.HasValue;
         bool validEmptyIdentity = response.LastProcessId is null &&
@@ -337,8 +359,12 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
                     response.ProcessName,
                     configuration.Configuration.Profile)
                 : null,
-            response.LastStatusReportedAt);
+            response.LastStatusReportedAt,
+            response.LogSourceIdentifier);
     }
+
+    private static bool IsValidLogSourceIdentifier(string? value) =>
+        value is { Length: 64 } && value.All(Uri.IsHexDigit);
 
     private sealed class ClaimNextResponse
     {
@@ -395,6 +421,8 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
         public DateTimeOffset? LastProcessStartedAt { get; init; }
 
         public DateTimeOffset? LastStatusReportedAt { get; init; }
+
+        public string? LogSourceIdentifier { get; init; }
     }
 
     private sealed record FailCommandRequest(string ErrorCode, string ErrorMessage);

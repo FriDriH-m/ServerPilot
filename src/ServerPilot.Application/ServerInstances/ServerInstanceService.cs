@@ -78,6 +78,90 @@ public sealed class ServerInstanceService(
             : ApplyAvailability(details, timeProvider.GetUtcNow());
     }
 
+    public async Task<ServerInstanceLogView?> GetLogsAsync(
+        Guid id,
+        Guid userId,
+        ServerInstanceLogCursor? cursor,
+        CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty)
+        {
+            return null;
+        }
+
+        ValidateUserId(userId);
+        ServerInstanceLogDetails? details = await serverInstances.FindOwnedLogsAsync(
+            id,
+            userId,
+            cancellationToken);
+        if (details is null)
+        {
+            return null;
+        }
+
+        if (details.Profile != ServerInstanceProfile.ProjectZomboid)
+        {
+            return new ServerInstanceLogView(
+                ServerInstanceLogViewStatus.Unsupported,
+                null,
+                true,
+                [],
+                null,
+                false);
+        }
+
+        DateTimeOffset now = timeProvider.GetUtcNow();
+        bool isStale = AgentAvailabilityEvaluator.Evaluate(
+                details.AgentLastSeenAt,
+                now,
+                availabilityOptions.OfflineThreshold) == AgentAvailabilityStatus.Offline ||
+            !details.ReportedAt.HasValue ||
+            now - details.ReportedAt.Value > availabilityOptions.OfflineThreshold;
+        ServerInstanceLogViewStatus status = details.Status switch
+        {
+            ServerInstanceLogStatus.Available => ServerInstanceLogViewStatus.Available,
+            ServerInstanceLogStatus.Missing => ServerInstanceLogViewStatus.Missing,
+            ServerInstanceLogStatus.Unavailable => ServerInstanceLogViewStatus.Unavailable,
+            null => ServerInstanceLogViewStatus.Waiting,
+            _ => throw new InvalidOperationException(
+                $"Unsupported server log status '{details.Status}'."),
+        };
+
+        ServerInstanceLogCursor? currentCursor =
+            details.StreamId is Guid streamId && details.Offset is long offset
+                ? new ServerInstanceLogCursor(streamId, offset)
+                : null;
+        if (currentCursor is null)
+        {
+            return new ServerInstanceLogView(
+                status,
+                null,
+                true,
+                [],
+                details.ReportedAt,
+                isStale);
+        }
+
+        bool currentKnown = cursor == currentCursor;
+        bool canReturnDelta = !currentKnown &&
+            cursor is not null &&
+            cursor.StreamId == currentCursor.StreamId &&
+            cursor.Offset == details.ChunkFromOffset &&
+            !details.ChunkReset;
+        string content = currentKnown
+            ? string.Empty
+            : canReturnDelta
+                ? details.ChunkContent ?? string.Empty
+                : details.Content ?? string.Empty;
+        return new ServerInstanceLogView(
+            status,
+            currentCursor.ToString(),
+            !currentKnown && !canReturnDelta,
+            SplitLogLines(content),
+            details.ReportedAt,
+            isStale);
+    }
+
     public async Task<UpdateServerInstanceResult> UpdateAsync(
         Guid id,
         Guid userId,
@@ -204,4 +288,9 @@ public sealed class ServerInstanceService(
                 "Server instance list page must be between 1 and 1000.");
         }
     }
+
+    private static string[] SplitLogLines(string content) =>
+        content.Length == 0
+            ? []
+            : content[..^1].Split('\n', StringSplitOptions.None);
 }

@@ -78,6 +78,29 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
         ProjectDetails(OwnedByUser(userId).Where(serverInstance => serverInstance.Id == id))
             .SingleOrDefaultAsync(cancellationToken);
 
+    public Task<ServerInstanceLogDetails?> FindOwnedLogsAsync(
+        Guid id,
+        Guid userId,
+        CancellationToken cancellationToken) =>
+        OwnedByUser(userId)
+            .AsNoTracking()
+            .Where(serverInstance => serverInstance.Id == id)
+            .Select(serverInstance => new ServerInstanceLogDetails(
+                serverInstance.Profile,
+                serverInstance.LastLogStatus,
+                serverInstance.LastLogContent,
+                serverInstance.LastLogStreamId,
+                serverInstance.LastLogOffset,
+                serverInstance.LastLogChunkContent,
+                serverInstance.LastLogChunkFromOffset,
+                serverInstance.LastLogChunkReset,
+                serverInstance.LastLogReportedAt,
+                dbContext.Agents
+                    .Where(agent => agent.Id == serverInstance.AgentId)
+                    .Select(agent => agent.LastSeenAt)
+                    .Single()))
+            .SingleOrDefaultAsync(cancellationToken);
+
     public async Task<UpdateServerInstanceResult> UpdateOwnedAsync(
         Guid id,
         Guid userId,
@@ -230,6 +253,7 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
             DateTimeOffset? processStartedAt,
             DateTimeOffset reportedAt,
             ServerInstanceMetricReport? metrics,
+            ServerInstanceLogReport? logs,
             CancellationToken cancellationToken)
     {
         await using IDbContextTransaction transaction =
@@ -257,7 +281,8 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
                 processId,
                 processStartedAt,
                 reportedAt,
-                metrics);
+                metrics,
+                logs);
         ApplicationStateReportResult mapped = result switch
         {
             DomainStateReportResult.Succeeded => ApplicationStateReportResult.Succeeded,
@@ -267,6 +292,8 @@ internal sealed class ServerInstanceRepository(ServerPilotDbContext dbContext)
                 ApplicationStateReportResult.InvalidProcessIdentity,
             DomainStateReportResult.InvalidMetrics =>
                 ApplicationStateReportResult.InvalidMetrics,
+            DomainStateReportResult.InvalidLogs =>
+                ApplicationStateReportResult.InvalidLogs,
             DomainStateReportResult.StaleReport => ApplicationStateReportResult.StaleReport,
             _ => throw new InvalidOperationException(
                 $"Unsupported process-state report result '{result}'."),

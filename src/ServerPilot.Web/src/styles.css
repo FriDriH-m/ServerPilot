@@ -835,6 +835,92 @@ button:disabled {
   box-shadow: none;
 }
 
+.server-log-viewer {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1.25rem;
+  padding: 1rem;
+  border: 1px solid #22334a;
+  border-radius: 0.9rem;
+  background: #091321;
+}
+
+.log-toolbar,
+.log-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.log-toolbar h3,
+.log-toolbar p,
+.log-status-row,
+.log-limit-copy {
+  margin: 0;
+}
+
+.compact-button {
+  min-width: 6rem;
+  padding: 0.55rem 0.9rem;
+}
+
+.log-status-row {
+  justify-content: flex-start;
+  color: #91a1b4;
+  font-size: 0.82rem;
+}
+
+.log-status {
+  padding: 0.25rem 0.55rem;
+  border: 1px solid #36506f;
+  border-radius: 999px;
+  color: #dce8f5;
+}
+
+.log-status-missing,
+.log-status-unavailable {
+  border-color: #8d6731;
+  color: #ffd490;
+}
+
+.log-filter {
+  display: grid;
+  gap: 0.4rem;
+  color: #a9b9ca;
+  font-size: 0.85rem;
+}
+
+.log-filter input {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #2c425e;
+  border-radius: 0.6rem;
+  color: #ecf5ff;
+  background: #0d1a2a;
+}
+
+.log-output {
+  min-height: 12rem;
+  max-height: 24rem;
+  margin: 0;
+  padding: 0.9rem;
+  overflow: auto;
+  border: 1px solid #1f344d;
+  border-radius: 0.65rem;
+  color: #c7f7d8;
+  background: #050a11;
+  font: 0.78rem/1.55 "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.log-limit-copy {
+  color: #71849b;
+  font-size: 0.78rem;
+}
+
 @media (max-width: 840px) {
   .auth-shell {
     grid-template-columns: 1fr;

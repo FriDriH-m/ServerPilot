@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -77,6 +78,18 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
             (await getResponse.Content.ReadFromJsonAsync<ServerInstanceResponse>())!;
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
         Assert.Equal(createRequest.WorkingDirectory, fetched.WorkingDirectory);
+
+        using HttpResponseMessage genericLogsResponse = await client.GetAsync(
+            $"/api/server-instances/{created.Id}/logs",
+            CancellationToken.None);
+        string genericLogsPayload = await genericLogsResponse.Content.ReadAsStringAsync(
+            CancellationToken.None);
+        ServerInstanceLogsResponse genericLogs = JsonSerializer.Deserialize<ServerInstanceLogsResponse>(
+            genericLogsPayload,
+            JsonSerializerOptions.Web)!;
+        Assert.Equal(HttpStatusCode.OK, genericLogsResponse.StatusCode);
+        Assert.Equal("Unsupported", genericLogs.Status);
+        Assert.DoesNotContain(createRequest.ExecutablePath, genericLogsPayload, StringComparison.Ordinal);
 
         AuthorizeUser(otherUser.AccessToken);
         using HttpResponseMessage foreignGetResponse = await client.GetAsync(
@@ -198,6 +211,194 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
             CancellationToken.None);
         Assert.Equal(HttpStatusCode.BadRequest, customArguments.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, unsafeDataDirectory.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProjectZomboidLogsAreBoundedIncrementalAndOwnerScoped()
+    {
+        AuthenticationResponse owner = await RegisterUserAsync("log-owner@example.com");
+        RegisteredAgent agent = await RegisterAgentAsync(owner.AccessToken, "Log Agent");
+        AuthenticationResponse otherOwner = await RegisterUserAsync("log-other@example.com");
+        ServerInstanceRequest request = CreateRequest(agent.AgentId) with
+        {
+            Profile = "ProjectZomboid",
+            ExecutablePath = @"C:\Servers\ProjectZomboid\StartServer64.bat",
+            Arguments = string.Empty,
+            WorkingDirectory = @"C:\Servers\ProjectZomboid",
+            ProcessName = "java",
+            DataDirectory = @"C:\ServerPilotData\ProjectZomboid",
+        };
+
+        AuthorizeUser(owner.AccessToken);
+        using HttpResponseMessage createResponse = await client.PostAsJsonAsync(
+            "/api/server-instances",
+            request,
+            CancellationToken.None);
+        ServerInstanceResponse created =
+            (await createResponse.Content.ReadFromJsonAsync<ServerInstanceResponse>())!;
+
+        AuthorizeAgent(agent.Credential);
+        AgentServerInstanceResponse assignment = Assert.Single(
+            (await client.GetFromJsonAsync<AgentServerInstanceResponse[]>(
+                $"/api/agents/{agent.AgentId}/server-instances",
+                CancellationToken.None))!);
+        Assert.NotNull(assignment.LogSourceIdentifier);
+        Guid streamId = Guid.NewGuid();
+        const string initialContent = "first\npassword=[REDACTED]\n";
+        long initialOffset = Encoding.UTF8.GetByteCount(initialContent);
+        using HttpResponseMessage initialReport = await client.PostAsJsonAsync(
+            $"/api/agents/{agent.AgentId}/server-instances/{created.Id}/status",
+            new
+            {
+                Status = "Stopped",
+                Log = new
+                {
+                    Status = "Available",
+                    SourceIdentifier = assignment.LogSourceIdentifier,
+                    StreamId = streamId,
+                    FromOffset = 0L,
+                    ToOffset = initialOffset,
+                    Reset = true,
+                    Content = initialContent,
+                },
+            },
+            CancellationToken.None);
+        using HttpResponseMessage heartbeat = await client.PostAsync(
+            $"/api/agents/{agent.AgentId}/heartbeat",
+            null,
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.NoContent, initialReport.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, heartbeat.StatusCode);
+
+        AuthorizeUser(owner.AccessToken);
+        ServerInstanceLogsResponse first =
+            (await client.GetFromJsonAsync<ServerInstanceLogsResponse>(
+                $"/api/server-instances/{created.Id}/logs",
+                CancellationToken.None))!;
+        Assert.Equal("Available", first.Status);
+        Assert.True(first.Reset);
+        Assert.Equal(["first", "password=[REDACTED]"], first.Lines);
+        Assert.False(first.IsStale);
+        Assert.NotNull(first.Cursor);
+
+        const string appendedContent = "next\n";
+        long appendedOffset = initialOffset + Encoding.UTF8.GetByteCount(appendedContent);
+        AuthorizeAgent(agent.Credential);
+        using HttpResponseMessage appendReport = await client.PostAsJsonAsync(
+            $"/api/agents/{agent.AgentId}/server-instances/{created.Id}/status",
+            new
+            {
+                Status = "Stopped",
+                Log = new
+                {
+                    Status = "Available",
+                    SourceIdentifier = assignment.LogSourceIdentifier,
+                    StreamId = streamId,
+                    FromOffset = initialOffset,
+                    ToOffset = appendedOffset,
+                    Reset = false,
+                    Content = appendedContent,
+                },
+            },
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.NoContent, appendReport.StatusCode);
+
+        AuthorizeUser(owner.AccessToken);
+        ServerInstanceLogsResponse delta =
+            (await client.GetFromJsonAsync<ServerInstanceLogsResponse>(
+                $"/api/server-instances/{created.Id}/logs?cursor={first.Cursor}",
+                CancellationToken.None))!;
+        Assert.False(delta.Reset);
+        Assert.Equal(["next"], delta.Lines);
+
+        AuthorizeAgent(agent.Credential);
+        using HttpResponseMessage duplicateReport = await client.PostAsJsonAsync(
+            $"/api/agents/{agent.AgentId}/server-instances/{created.Id}/status",
+            new
+            {
+                Status = "Stopped",
+                Log = new
+                {
+                    Status = "Available",
+                    SourceIdentifier = assignment.LogSourceIdentifier,
+                    StreamId = streamId,
+                    FromOffset = initialOffset,
+                    ToOffset = appendedOffset,
+                    Reset = false,
+                    Content = appendedContent,
+                },
+            },
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.NoContent, duplicateReport.StatusCode);
+
+        AuthorizeUser(owner.AccessToken);
+        ServerInstanceLogsResponse unchanged =
+            (await client.GetFromJsonAsync<ServerInstanceLogsResponse>(
+                $"/api/server-instances/{created.Id}/logs?cursor={delta.Cursor}",
+                CancellationToken.None))!;
+        Assert.False(unchanged.Reset);
+        Assert.Empty(unchanged.Lines);
+
+        Guid rotatedStreamId = Guid.NewGuid();
+        AuthorizeAgent(agent.Credential);
+        using HttpResponseMessage rotatedReport = await client.PostAsJsonAsync(
+            $"/api/agents/{agent.AgentId}/server-instances/{created.Id}/status",
+            new
+            {
+                Status = "Stopped",
+                Log = new
+                {
+                    Status = "Available",
+                    SourceIdentifier = assignment.LogSourceIdentifier,
+                    StreamId = rotatedStreamId,
+                    FromOffset = 0L,
+                    ToOffset = 8L,
+                    Reset = true,
+                    Content = "rotated\n",
+                },
+            },
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.NoContent, rotatedReport.StatusCode);
+
+        AuthorizeUser(owner.AccessToken);
+        ServerInstanceLogsResponse rotated =
+            (await client.GetFromJsonAsync<ServerInstanceLogsResponse>(
+                $"/api/server-instances/{created.Id}/logs?cursor={delta.Cursor}",
+                CancellationToken.None))!;
+        Assert.True(rotated.Reset);
+        Assert.Equal(["rotated"], rotated.Lines);
+
+        AuthorizeUser(otherOwner.AccessToken);
+        using HttpResponseMessage foreign = await client.GetAsync(
+            $"/api/server-instances/{created.Id}/logs",
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+
+        AuthorizeUser(owner.AccessToken);
+        using HttpResponseMessage invalidCursor = await client.GetAsync(
+            $"/api/server-instances/{created.Id}/logs?cursor=not-a-cursor",
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidCursor.StatusCode);
+
+        AuthorizeAgent(agent.Credential);
+        using HttpResponseMessage invalidSource = await client.PostAsJsonAsync(
+            $"/api/agents/{agent.AgentId}/server-instances/{created.Id}/status",
+            new
+            {
+                Status = "Stopped",
+                Log = new
+                {
+                    Status = "Available",
+                    SourceIdentifier = new string('B', 64),
+                    StreamId = rotatedStreamId,
+                    FromOffset = 8L,
+                    ToOffset = 12L,
+                    Reset = false,
+                    Content = "bad\n",
+                },
+            },
+            CancellationToken.None);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidSource.StatusCode);
     }
 
     [Theory]
@@ -610,7 +811,16 @@ public sealed class ServerInstanceTests : IAsyncLifetime, IDisposable
         string Profile,
         string ExecutablePath,
         string? DataDirectory,
-        string ReportedStatus);
+        string ReportedStatus,
+        string? LogSourceIdentifier);
+
+    private sealed record ServerInstanceLogsResponse(
+        string Status,
+        string? Cursor,
+        bool Reset,
+        IReadOnlyList<string> Lines,
+        DateTimeOffset? ReportedAt,
+        bool IsStale);
 
     private sealed record ProjectZomboidPathsResponse(
         string ConfigurationDirectory,

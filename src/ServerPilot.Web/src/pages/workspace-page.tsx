@@ -16,12 +16,15 @@ import { CommandHistory } from "../components/command-history";
 import { ErrorAlert } from "../components/error-alert";
 import { ServerInstanceForm } from "../components/server-instance-form";
 import { ServerMetrics } from "../components/server-metrics";
+import { ServerLogViewer } from "../components/server-log-viewer";
 import { StatusPill } from "../components/status-pill";
 import {
   formatTimestamp,
   getCommandAvailability,
   isActiveCommand,
   appendMetricSample,
+  applyServerLogUpdate,
+  type ServerLogBuffer,
 } from "../dashboard/dashboard-model";
 import { Link } from "../router";
 
@@ -32,7 +35,7 @@ interface WorkspacePageProps {
 type FormMode = "create" | "edit" | null;
 
 const overviewRefreshIntervalMilliseconds = 15_000;
-const detailRefreshIntervalMilliseconds = 10_000;
+const detailRefreshIntervalMilliseconds = 12_000;
 const listPageSize = 100;
 
 function isAbortError(error: unknown): boolean {
@@ -63,8 +66,12 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
     useState<ServerInstanceDetails | null>(null);
   const [commands, setCommands] = useState<ServerCommand[]>([]);
   const [metricHistory, setMetricHistory] = useState<ServerInstanceMetrics[]>([]);
+  const [serverLogs, setServerLogs] = useState<ServerLogBuffer | null>(null);
+  const [logsPaused, setLogsPaused] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const hasLoadedAdditionalCommandPages = useRef(false);
+  const logCursor = useRef<string | null>(null);
+  const logsPausedRef = useRef(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -144,6 +151,10 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
       setSelectedServer(null);
       setCommands([]);
       setMetricHistory([]);
+      setServerLogs(null);
+      setLogsPaused(false);
+      logCursor.current = null;
+      logsPausedRef.current = false;
       setNextCursor(null);
       return undefined;
     }
@@ -153,6 +164,10 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
     setSelectedServer(null);
     setCommands([]);
     setMetricHistory([]);
+    setServerLogs(null);
+    setLogsPaused(false);
+    logCursor.current = null;
+    logsPausedRef.current = false;
     setNextCursor(null);
     hasLoadedAdditionalCommandPages.current = false;
     setDetailError(null);
@@ -161,9 +176,15 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
     async function loadSelection() {
       setDetailLoading(true);
       try {
-        const [server, history] = await Promise.all([
+        const [server, history, logs] = await Promise.all([
           api.getServerInstance(accessToken, selectedServerId!, controller.signal),
           api.listServerCommands(
+            accessToken,
+            selectedServerId!,
+            undefined,
+            controller.signal,
+          ),
+          api.getServerLogs(
             accessToken,
             selectedServerId!,
             undefined,
@@ -173,6 +194,8 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
         if (!disposed) {
           setSelectedServer(server);
           setMetricHistory((current) => appendMetricSample(current, server.metrics));
+          setServerLogs(applyServerLogUpdate(null, logs));
+          logCursor.current = logs.cursor;
           setCommands(history.items);
           setNextCursor(history.nextCursor);
           setDetailError(null);
@@ -190,7 +213,15 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
 
     async function refreshState() {
       try {
-        const [server, history] = await Promise.all([
+        const logsRequest = logsPausedRef.current
+          ? Promise.resolve(null)
+          : api.getServerLogs(
+              accessToken,
+              selectedServerId!,
+              logCursor.current ?? undefined,
+              controller.signal,
+            );
+        const [server, history, logs] = await Promise.all([
           api.getServerInstance(
             accessToken,
             selectedServerId!,
@@ -202,10 +233,15 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
             undefined,
             controller.signal,
           ),
+          logsRequest,
         ]);
         if (!disposed) {
           setSelectedServer(server);
           setMetricHistory((current) => appendMetricSample(current, server.metrics));
+          if (logs) {
+            setServerLogs((current) => applyServerLogUpdate(current, logs));
+            logCursor.current = logs.cursor;
+          }
           setCommands((current) => mergeCommands(current, history.items));
           if (!hasLoadedAdditionalCommandPages.current) {
             setNextCursor(history.nextCursor);
@@ -261,6 +297,11 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
     ? ["Starting", "Running", "Stopping"].includes(selectedServer.status) ||
       isActiveCommand(latestCommand)
     : false;
+
+  function changeLogsPaused(paused: boolean) {
+    logsPausedRef.current = paused;
+    setLogsPaused(paused);
+  }
 
   if (!session) {
     return null;
@@ -610,6 +651,14 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
                 <ServerMetrics
                   current={selectedServer.metrics}
                   history={metricHistory}
+                />
+
+                <ServerLogViewer
+                  key={selectedServer.id}
+                  logs={serverLogs}
+                  paused={logsPaused}
+                  stateStale={selectedServer.isStateStale}
+                  onPausedChange={changeLogsPaused}
                 />
 
                 <div className="command-actions">
