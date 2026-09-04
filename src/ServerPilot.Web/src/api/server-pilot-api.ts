@@ -130,9 +130,26 @@ export interface ServerCommandHistoryPage {
   nextCursor: string | null;
 }
 
-export type ServerCommandAction = "start" | "stop";
+export type ServerCommandAction = "start" | "stop" | "backup";
+
+export interface BackupDetails {
+  id: string;
+  status: string;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  sizeBytes: number | null;
+  checksum: string | null;
+  errorCode: string | null;
+}
+
+export interface BackupHistoryPage {
+  items: BackupDetails[];
+  nextCursor: string | null;
+}
 
 export interface ManagementApi {
+  listBackups(accessToken: string, id: string, cursor?: string, signal?: AbortSignal): Promise<BackupHistoryPage>;
   listAgents(
     accessToken: string,
     page: number,
@@ -190,6 +207,10 @@ function normalizeBaseUrl(value: string | undefined): string {
 }
 
 export class ServerPilotApi implements AuthenticationApi, ManagementApi {
+  listBackups(accessToken: string, id: string, cursor?: string, signal?: AbortSignal): Promise<BackupHistoryPage> {
+    const query = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
+    return this.send<BackupHistoryPage>(`/server-instances/${id}/backups?limit=20${query}`, { accessToken, signal });
+  }
   private readonly baseUrl: string;
   private readonly fetchImplementation: typeof fetch;
 

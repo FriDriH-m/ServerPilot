@@ -13,6 +13,7 @@ namespace ServerPilot.Api.Controllers;
 [Route("api")]
 public sealed class AgentCommandsController(
     AgentCommandService commands,
+    ServerPilot.Application.Backups.BackupService backups,
     ICurrentAgent currentAgent,
     ILogger<AgentCommandsController> logger) : ControllerBase
 {
@@ -117,6 +118,12 @@ public sealed class AgentCommandsController(
                 token),
             cancellationToken);
 
+    [HttpPost("commands/{commandId:guid}/complete-backup")]
+    public Task<IActionResult> CompleteBackup(Guid commandId, CompleteBackupRequest request,
+        CancellationToken cancellationToken) =>
+        ApplyTransitionAsync(commandId, "complete-backup", (agentId, token) =>
+            backups.CompleteAsync(commandId, agentId, request.SizeBytes, request.Checksum, token), cancellationToken);
+
     private async Task<IActionResult> ApplyTransitionAsync(
         Guid commandId,
         string transition,
@@ -180,3 +187,8 @@ public sealed class AgentCommandsController(
                 delivery.ServerInstance.DataDirectory));
     }
 }
+
+public sealed record CompleteBackupRequest(
+    [System.ComponentModel.DataAnnotations.Range(1, ServerPilot.Domain.Backups.Backup.MaximumArchiveBytes)] long SizeBytes,
+    [System.ComponentModel.DataAnnotations.Required]
+    [System.ComponentModel.DataAnnotations.RegularExpression("^[0-9A-Fa-f]{64}$")] string Checksum);

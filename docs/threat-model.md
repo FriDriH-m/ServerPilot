@@ -15,6 +15,10 @@ child-process discovery and bounded console shutdown, plus the bounded process C
 snapshot reported by the authenticated Agent and displayed only to the owning user. Issue #40
 adds the profile-derived Project Zomboid `console.txt` read boundary, Agent-side redaction,
 bounded cursor chunks and owner-only recent-log view.
+Issue #41 adds stopped-server cachedir archives: local-only destination configuration,
+bounded ZIP creation, no-overwrite publication, command-bound replay and atomic
+owner-scoped backup metadata (ADR 0017). Private ACLs and absence of out-of-band writers
+remain operational requirements; no API can read/download arbitrary archive files.
 
 ## Data flow and trust boundaries
 
@@ -255,3 +259,10 @@ uses a separate authentication scheme and is represented in PostgreSQL only by i
   argument after both API and Agent validation.
 - Never signal a PID until its start time, executable path and process name match the tracked identity.
 - Use HTTPS outside local development.
+- Backup commands carry no source/destination path. Read only the dedicated Project
+  Zomboid cachedir; reject reparse points and Windows source hard links. Keep the
+  configured destination outside it with private ACLs and the Agent's minimum permissions.
+- Publish a backup only after complete archive/content validation; never report a
+  partial file as successful. Reuse the command-bound final artifact on delivery retry.
+- Commit backup metadata and terminal command state together; accept completion only
+  from the assigned Agent and expose metadata only to the owning user.

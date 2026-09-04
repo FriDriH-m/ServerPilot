@@ -231,6 +231,8 @@ API
 - [`docs/adr/0014-project-zomboid-process-profile.md`](docs/adr/0014-project-zomboid-process-profile.md) — решение по ограниченному batch-to-Java профилю Project Zomboid.
 - [`docs/adr/0015-bounded-process-metrics.md`](docs/adr/0015-bounded-process-metrics.md) — решение по bounded-сбору CPU/RAM/uptime, latest-snapshot persistence и transient Web history.
 - [`docs/adr/0016-bounded-project-zomboid-log-tailing.md`](docs/adr/0016-bounded-project-zomboid-log-tailing.md) — решение по безопасному bounded tail `console.txt`, cursor/retry/rotation semantics и owner-only Web viewer.
+- [`docs/local-backups.md`](docs/local-backups.md) — настройка и ограничения локальных ZIP-backup остановленного Project Zomboid через Agent (issue #41).
+- [`docs/adr/0017-local-backup-publication-and-recovery.md`](docs/adr/0017-local-backup-publication-and-recovery.md) — consistency, filesystem boundary и идемпотентное восстановление backup-команд.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.
 
@@ -719,3 +721,7 @@ Issue #40 добавляет bounded просмотр Project Zomboid `console.t
 профилем, Agent отправляет incremental cursor chunks, PostgreSQL и Web удерживают фиксированное
 последнее окно, а viewer поддерживает reconnect reset, pause/resume, filter и stale состояния.
 Arbitrary files, durable log history и Loki остаются вне этой задачи.
+Issue #41 добавляет ручной локальный ZIP-backup выделенного Project Zomboid cachedir:
+только после подтверждённого Stopped, с локально настроенной папкой назначения,
+лимитами, checksum, atomic publication и owner-only metadata. Restore, remote storage,
+расписания и retention остаются вне этого этапа; настройка описана в `docs/local-backups.md`.

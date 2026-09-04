@@ -12,6 +12,7 @@ public enum AgentCommandType
 {
     StartServer = 0,
     StopServer,
+    CreateBackup,
 }
 
 public sealed record ClaimedAgentServerInstance(

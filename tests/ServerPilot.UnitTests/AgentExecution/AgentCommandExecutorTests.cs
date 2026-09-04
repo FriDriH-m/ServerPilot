@@ -13,6 +13,26 @@ namespace ServerPilot.UnitTests.AgentExecution;
 public sealed class AgentCommandExecutorTests
 {
     [Fact]
+    public async Task BackupCompletionRetriesMetadataWithoutCreatingAnotherArchive()
+    {
+        List<string> events = [];
+        RecordingApiClient api = new(events) { CompleteFailuresRemaining = 4 };
+        FakeProcessSupervisor supervisor = new(events);
+        var creator = new RecordingBackupCreator();
+        var executor = new AgentCommandExecutor(api, new AgentRetryExecutor(new ImmediateDelay()),
+            new SuccessfulRegistry(supervisor), NullLogger<AgentCommandExecutor>.Instance, creator);
+        var execution = new AgentCommandExecution(CreateCommand(AgentCommandType.CreateBackup));
+        await Assert.ThrowsAsync<AgentRetryExhaustedException>(() => executor.ExecuteAsync(CreateCredential(), execution, CancellationToken.None));
+        await executor.ExecuteAsync(CreateCredential(), execution, CancellationToken.None);
+        Assert.Equal(1, creator.Calls);
+        Assert.Equal(creator.Artifact, api.BackupArtifact);
+        Assert.Equal(5, api.CompleteCalls);
+        Assert.Equal(0, supervisor.StartCalls);
+        Assert.Equal(0, supervisor.StopCalls);
+        Assert.Equal(0, api.StateReportCalls);
+    }
+
+    [Fact]
     public async Task StartMarksRunningExecutesVerifiesAndCompletesInOrder()
     {
         List<string> events = [];
@@ -232,6 +252,14 @@ public sealed class AgentCommandExecutorTests
 
     private sealed class RecordingApiClient(List<string> events) : IAgentApiClient
     {
+        public BackupArtifact? BackupArtifact { get; private set; }
+
+        public Task CompleteBackupAsync(AgentCredential credential, ClaimedAgentCommand command,
+            BackupArtifact artifact, CancellationToken cancellationToken)
+        {
+            BackupArtifact = artifact;
+            return CompleteCommandAsync(credential, command, cancellationToken);
+        }
         public int CompleteFailuresRemaining { get; set; }
 
         public int StartCalls { get; private set; }
@@ -366,5 +394,17 @@ public sealed class AgentCommandExecutorTests
     {
         public Task DelayAsync(TimeSpan delay, CancellationToken cancellationToken) =>
             Task.CompletedTask;
+    }
+
+    private sealed class RecordingBackupCreator : ServerPilot.Agent.Backups.ILocalBackupCreator
+    {
+        public int Calls { get; private set; }
+        public BackupArtifact Artifact { get; } = new(120, new string('A', 64));
+        public Task<AgentCommandOutcome> CreateAsync(ClaimedAgentCommand command,
+            IProcessSupervisor supervisor, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(new AgentCommandOutcome(true, null, null, null, Artifact));
+        }
     }
 }

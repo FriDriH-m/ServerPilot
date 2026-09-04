@@ -6,4 +6,5 @@ public enum CreateServerCommandStatus
     ServerInstanceNotFound,
     ActiveCommandConflict,
     UnsupportedType,
+    BackupNotAllowed,
 }

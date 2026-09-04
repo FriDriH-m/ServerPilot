@@ -242,6 +242,10 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
             JsonContent.Create(new FailCommandRequest(errorCode, errorMessage)),
             cancellationToken);
 
+    public Task CompleteBackupAsync(AgentCredential credential, ClaimedAgentCommand command,
+        BackupArtifact artifact, CancellationToken cancellationToken) =>
+        SendTransitionAsync(credential, command, "complete-backup", JsonContent.Create(artifact), cancellationToken);
+
     private async Task SendTransitionAsync(
         AgentCredential credential,
         ClaimedAgentCommand command,

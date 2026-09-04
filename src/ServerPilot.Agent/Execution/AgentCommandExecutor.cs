@@ -10,7 +10,8 @@ public sealed class AgentCommandExecutor(
     IAgentApiClient apiClient,
     AgentRetryExecutor retry,
     IProcessSupervisorRegistry supervisors,
-    ILogger<AgentCommandExecutor> logger) : IAgentCommandExecutor
+    ILogger<AgentCommandExecutor> logger,
+    ServerPilot.Agent.Backups.ILocalBackupCreator? backups = null) : IAgentCommandExecutor
 {
     private const string ProcessOperationFailedMessage =
         "The local process operation did not reach the required state.";
@@ -92,7 +93,9 @@ public sealed class AgentCommandExecutor(
         if (recordedOutcome.Succeeded)
         {
             await retry.ExecuteAsync(
-                token => apiClient.CompleteCommandAsync(credential, command, token),
+                token => recordedOutcome.Backup is not null
+                    ? apiClient.CompleteBackupAsync(credential, command, recordedOutcome.Backup, token)
+                    : apiClient.CompleteCommandAsync(credential, command, token),
                 cancellationToken);
             LogExecutionCompleted(
                 logger,
@@ -157,6 +160,8 @@ public sealed class AgentCommandExecutor(
             AgentCommandType.StopServer => await ExecuteStopAsync(
                 resolution.Supervisor,
                 cancellationToken),
+            AgentCommandType.CreateBackup when backups is not null => await backups.CreateAsync(
+                command, resolution.Supervisor, cancellationToken),
             _ => AgentCommandOutcome.Failed(
                 "UnsupportedCommandType",
                 "The command type is not supported by this Agent."),

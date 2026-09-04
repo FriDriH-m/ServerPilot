@@ -17,6 +17,7 @@ import { ErrorAlert } from "../components/error-alert";
 import { ServerInstanceForm } from "../components/server-instance-form";
 import { ServerMetrics } from "../components/server-metrics";
 import { ServerLogViewer } from "../components/server-log-viewer";
+import { ServerBackups } from "../components/server-backups";
 import { StatusPill } from "../components/status-pill";
 import {
   formatTimestamp,
@@ -376,7 +377,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
       return;
     }
 
-    const label = action === "start" ? "Start" : "Stop";
+    const label = action === "backup" ? "Create a local backup of" : action === "start" ? "Start" : "Stop";
     if (!window.confirm(`${label} ${selectedServer.name}?`)) {
       return;
     }
@@ -393,7 +394,7 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
       setCommands((current) => mergeCommands(current, [command]));
       setNotice(
         `${command.type} was accepted with status ${command.status}. ` +
-          "The displayed process state will change only after the Agent reports it.",
+          (action === "backup" ? "Use Refresh backups to see the result." : "The displayed process state will change only after the Agent reports it."),
       );
       await refreshOverview(true);
     } catch (error) {
@@ -728,6 +729,17 @@ export function WorkspacePage({ api = serverPilotApi }: WorkspacePageProps) {
                     {mutation === "delete" ? "Deleting…" : "Delete server"}
                   </button>
                 </div>
+
+                {selectedServer.profile === "ProjectZomboid" ? (
+                  <ServerBackups
+                    key={`${selectedServer.id}:${accessToken}`}
+                    api={api}
+                    accessToken={accessToken}
+                    serverId={selectedServer.id}
+                    canCreate={!detailLoading && mutation === null && commandAvailability.canStart && selectedServer.status === "Stopped"}
+                    onCreate={() => void createCommand("backup")}
+                  />
+                ) : null}
 
                 <CommandHistory
                   commands={commands}

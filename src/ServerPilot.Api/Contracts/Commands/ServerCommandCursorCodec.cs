@@ -8,10 +8,12 @@ internal static class ServerCommandCursorCodec
     private const int CurrentVersion = 1;
     private const int MaximumEncodedLength = 512;
 
-    public static string Encode(ServerCommandDetails command)
+    public static string Encode(ServerCommandDetails command) => Encode(command.CreatedAt, command.Id);
+
+    public static string Encode(DateTimeOffset createdAt, Guid id)
     {
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
-            new CursorPayload(CurrentVersion, command.CreatedAt.ToUniversalTime(), command.Id),
+            new CursorPayload(CurrentVersion, createdAt.ToUniversalTime(), id),
             JsonSerializerOptions.Web);
         return Convert.ToBase64String(payload)
             .TrimEnd('=')

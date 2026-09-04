@@ -51,6 +51,11 @@ public sealed class ServerCommandsController(
         CancellationToken cancellationToken) =>
         CreateAsync(serverInstanceId, ServerCommandType.StopServer, cancellationToken);
 
+    [HttpPost("backup")]
+    public Task<ActionResult<ServerCommandResponse>> Backup(
+        Guid serverInstanceId, CancellationToken cancellationToken) =>
+        CreateAsync(serverInstanceId, ServerCommandType.CreateBackup, cancellationToken);
+
     [HttpGet]
     public async Task<ActionResult<ServerCommandHistoryResponse>> List(
         Guid serverInstanceId,
@@ -129,6 +134,12 @@ public sealed class ServerCommandsController(
                 statusCode: StatusCodes.Status409Conflict,
                 title: "Conflict",
                 detail: "An active command already exists for this ServerInstance.");
+        }
+
+        if (result.Status == CreateServerCommandStatus.BackupNotAllowed)
+        {
+            return Problem(statusCode: StatusCodes.Status409Conflict, title: "Conflict",
+                detail: "Backup requires a Project Zomboid server with a fresh stopped report from an online Agent.");
         }
 
         if (result.Status != CreateServerCommandStatus.Succeeded || result.Command is null)

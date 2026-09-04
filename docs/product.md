@@ -871,6 +871,13 @@ Post-MVP issue #40 добавляет bounded live-log view для канони�
 pause/resume, локальный filter и stale/offline states. Generic log paths, archives, durable
 history, indexing и Loki остаются отложены.
 
+Post-MVP issue #41 добавляет ручное создание локального ZIP-backup для остановленного
+Project Zomboid. Источник — весь выделенный cachedir, назначение задаёт оператор
+в конфигурации Agent. Ограниченное потоковое архивирование, проверка содержимого, checksum и command-ID
+publication обеспечивают восстановление после прерванной доставки без дублей архива.
+Web показывает только owner-scoped metadata. Restore, remote storage, schedules и
+retention не реализуются этим slice; ограничения описаны в `docs/local-backups.md`.
+
 ### Этап 7. Асинхронное взаимодействие
 
 - RabbitMQ;

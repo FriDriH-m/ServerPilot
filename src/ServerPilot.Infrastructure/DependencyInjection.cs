@@ -30,6 +30,7 @@ public static class DependencyInjection
         services.AddScoped<IAgentInstallationTokenRepository, AgentInstallationTokenRepository>();
         services.AddScoped<IServerInstanceRepository, ServerInstanceRepository>();
         services.AddScoped<IServerCommandRepository, ServerCommandRepository>();
+        services.AddScoped<ServerPilot.Application.Backups.IBackupRepository, BackupRepository>();
         services.AddSingleton<IAgentCredentialGenerator,
             CryptographicAgentCredentialGenerator>();
         services.AddSingleton<IAgentInstallationTokenGenerator,

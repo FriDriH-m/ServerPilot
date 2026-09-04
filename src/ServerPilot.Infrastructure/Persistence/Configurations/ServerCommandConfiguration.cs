@@ -31,7 +31,7 @@ internal sealed class ServerCommandConfiguration : IEntityTypeConfiguration<Serv
             {
                 tableBuilder.HasCheckConstraint(
                     ValidTypeAndStatusConstraintName,
-                    "type BETWEEN 1 AND 2 AND status BETWEEN 1 AND 7 AND attempt_count >= 0");
+                    "type BETWEEN 1 AND 3 AND status BETWEEN 1 AND 7 AND attempt_count >= 0");
                 tableBuilder.HasCheckConstraint(
                     ValidStateConstraintName,
                     "(status = 1 AND attempt_count = 0 AND claimed_at IS NULL AND " +

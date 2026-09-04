@@ -451,6 +451,12 @@ directory, API сверяет opaque source identifier и cursor под тем �
 хранит лишь последнее 32 KiB/400-line окно. Owner Web API не принимает путь и не превращает
 эту post-MVP функцию в arbitrary file browser или durable log retention внутри MVP.
 
+Post-MVP issue #41 отдельно добавляет `CreateBackup` для остановленного Project Zomboid:
+Agent архивирует dedicated cachedir в локально разрешённый каталог, API атомарно
+сохраняет состояние команды и metadata, Web показывает owner-only историю. Этот
+slice не расширяет базовый MVP до restore, schedules или remote backup storage.
+Consistency и ограничения: [local-backups.md](local-backups.md), ADR 0017.
+
 `claim-next` доступен только Agent credential, чей Agent ID точно совпадает с маршрутом.
 Он блокирует строку Agent на время короткого PostgreSQL statement. Уже назначенная этому
 Agent команда в `Claimed` или `Running` выдаётся повторно как `Recovery`; только при её

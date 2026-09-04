@@ -996,3 +996,4 @@ button:disabled {
     grid-column: 1;
   }
 }
+:where(.backup-checksum) { overflow-wrap: anywhere; }

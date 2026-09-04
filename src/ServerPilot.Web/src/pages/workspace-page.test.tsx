@@ -89,6 +89,7 @@ function createManagementApi(
     deleteServerInstance: vi.fn().mockResolvedValue(undefined),
     createServerCommand: vi.fn(),
     listServerCommands: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    listBackups: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     ...overrides,
   };
 }
