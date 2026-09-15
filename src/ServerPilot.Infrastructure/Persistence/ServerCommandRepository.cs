@@ -3,14 +3,16 @@ using System.Data.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Npgsql;
+using ServerPilot.Application.Agents;
 using ServerPilot.Application.Commands;
+using ServerPilot.Domain.Backups;
 using ServerPilot.Domain.Commands;
 using ServerPilot.Domain.ServerInstances;
 using ServerPilot.Infrastructure.Persistence.Configurations;
 
 namespace ServerPilot.Infrastructure.Persistence;
 
-internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
+internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext, AgentAvailabilityOptions availability)
     : IServerCommandRepository
 {
     public async Task<ClaimedServerCommandDetails?> ClaimNextAsync(
@@ -234,6 +236,7 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
         CancellationToken cancellationToken)
     {
         DateTimeOffset utcStartedAt = startedAt.ToUniversalTime();
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         int updated = await dbContext.ServerCommands
             .Where(command =>
                 command.Id == commandId &&
@@ -248,6 +251,9 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
                 cancellationToken);
         if (updated == 1)
         {
+            await dbContext.Backups.Where(backup => backup.Id == commandId)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(backup => backup.Status, BackupStatus.Running), cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             return AgentCommandTransitionStatus.Succeeded;
         }
 
@@ -276,6 +282,7 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
             .Where(command =>
                 command.Id == commandId &&
                 command.AgentId == agentId &&
+                command.Type != ServerCommandType.CreateBackup &&
                 command.Status == ServerCommandStatus.Running &&
                 command.StartedAt != null &&
                 command.StartedAt <= utcCompletedAt)
@@ -312,6 +319,7 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
         CancellationToken cancellationToken)
     {
         DateTimeOffset utcCompletedAt = completedAt.ToUniversalTime();
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         int updated = await dbContext.ServerCommands
             .Where(command =>
                 command.Id == commandId &&
@@ -328,6 +336,9 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
                 cancellationToken);
         if (updated == 1)
         {
+            await dbContext.Backups.Where(backup => backup.Id == commandId)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(backup => backup.Status, BackupStatus.Failed), cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
             return AgentCommandTransitionStatus.Succeeded;
         }
 
@@ -375,6 +386,18 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext)
             type,
             createdAt,
             correlationId);
+        if (type == ServerCommandType.CreateBackup)
+        {
+            ServerInstance instance = await dbContext.ServerInstances.AsNoTracking()
+                .SingleAsync(item => item.Id == serverInstanceId, cancellationToken);
+            DateTimeOffset freshAfter = createdAt - availability.OfflineThreshold;
+            bool online = await dbContext.Agents.AsNoTracking().AnyAsync(agent =>
+                agent.Id == agentId.Value && agent.LastSeenAt >= freshAfter, cancellationToken);
+            if (!Backup.CanCreate(instance) || !online || instance.LastStatusReportedAt is null ||
+                instance.LastStatusReportedAt < freshAfter)
+                return new CreateServerCommandResult(CreateServerCommandStatus.BackupNotAllowed, null);
+            dbContext.Backups.Add(Backup.Create(command.Id));
+        }
         dbContext.ServerCommands.Add(command);
 
         try

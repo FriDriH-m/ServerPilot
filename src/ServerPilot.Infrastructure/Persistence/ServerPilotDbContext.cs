@@ -21,6 +21,8 @@ public sealed class ServerPilotDbContext(DbContextOptions<ServerPilotDbContext> 
 
     public DbSet<ServerCommand> ServerCommands => Set<ServerCommand>();
 
+    public DbSet<ServerPilot.Domain.Backups.Backup> Backups => Set<ServerPilot.Domain.Backups.Backup>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

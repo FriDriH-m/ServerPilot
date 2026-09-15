@@ -52,6 +52,7 @@ builder.Services.AddScoped<ServerInstanceService>();
 builder.Services.AddScoped<AgentServerInstanceService>();
 builder.Services.AddScoped<ServerCommandService>();
 builder.Services.AddScoped<AgentCommandService>();
+builder.Services.AddScoped<ServerPilot.Application.Backups.BackupService>();
 builder.Services.AddScoped<UserAuthenticationService>();
 builder.Services.AddSingleton(installationTokenOptions);
 builder.Services.AddSingleton(agentAvailabilityOptions);

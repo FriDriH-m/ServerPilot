@@ -25,6 +25,12 @@ AgentOptions agentOptions = builder.Configuration
 agentOptions.Validate();
 
 builder.Services.AddSingleton(agentOptions);
+ServerPilot.Agent.Backups.LocalBackupOptions backupOptions = builder.Configuration
+    .GetSection(ServerPilot.Agent.Backups.LocalBackupOptions.SectionName)
+    .Get<ServerPilot.Agent.Backups.LocalBackupOptions>() ?? new();
+backupOptions.Validate();
+builder.Services.AddSingleton(backupOptions);
+builder.Services.AddSingleton<ServerPilot.Agent.Backups.ILocalBackupCreator, ServerPilot.Agent.Backups.LocalBackupCreator>();
 builder.Services.AddSingleton<IAgentCredentialStore>(_ =>
     new WindowsProtectedAgentCredentialStore(isWindowsService));
 builder.Services.AddSingleton<IAgentRegistrationClient, HttpAgentRegistrationClient>();

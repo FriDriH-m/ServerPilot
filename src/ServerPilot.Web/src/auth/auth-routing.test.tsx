@@ -28,6 +28,7 @@ function createManagementApi(): ManagementApi {
     deleteServerInstance: vi.fn(),
     createServerCommand: vi.fn(),
     listServerCommands: vi.fn(),
+    listBackups: vi.fn(),
   };
 }
 

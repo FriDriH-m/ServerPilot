@@ -6,7 +6,8 @@ public sealed record AgentCommandOutcome(
     bool Succeeded,
     string? ErrorCode,
     string? ErrorMessage,
-    AgentProcessStateReport? ProcessState)
+    AgentProcessStateReport? ProcessState,
+    BackupArtifact? Backup = null)
 {
     public static AgentCommandOutcome Completed(AgentProcessStateReport processState) =>
         new(true, null, null, processState);

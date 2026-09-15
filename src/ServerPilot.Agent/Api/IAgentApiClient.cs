@@ -48,4 +48,10 @@ public interface IAgentApiClient
         string errorCode,
         string errorMessage,
         CancellationToken cancellationToken);
+
+    Task CompleteBackupAsync(AgentCredential credential, ClaimedAgentCommand command,
+        BackupArtifact artifact, CancellationToken cancellationToken) =>
+        throw new NotSupportedException("Backup reporting is not implemented by this client.");
 }
+
+public sealed record BackupArtifact(long SizeBytes, string Checksum);
