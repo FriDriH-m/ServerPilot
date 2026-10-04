@@ -11,7 +11,8 @@ public sealed class AgentCommandExecutor(
     AgentRetryExecutor retry,
     IProcessSupervisorRegistry supervisors,
     ILogger<AgentCommandExecutor> logger,
-    ServerPilot.Agent.Backups.ILocalBackupCreator? backups = null) : IAgentCommandExecutor
+    ServerPilot.Agent.Backups.ILocalBackupCreator? backups = null,
+    ServerPilot.Agent.Backups.ILocalBackupMaintenance? maintenance = null) : IAgentCommandExecutor
 {
     private const string ProcessOperationFailedMessage =
         "The local process operation did not reach the required state.";
@@ -72,6 +73,7 @@ public sealed class AgentCommandExecutor(
         {
             AgentCommandOutcome outcome = await ExecuteProcessOnceAsync(
                 command,
+                credential,
                 cancellationToken);
             execution.RecordOutcome(outcome);
         }
@@ -127,8 +129,12 @@ public sealed class AgentCommandExecutor(
 
     private async Task<AgentCommandOutcome> ExecuteProcessOnceAsync(
         ClaimedAgentCommand command,
+        AgentCredential credential,
         CancellationToken cancellationToken)
     {
+        if (command.Type is AgentCommandType.StartServer or AgentCommandType.CreateBackup &&
+            maintenance?.HasRecoveryPending(command.ServerInstanceId) == true)
+            return AgentCommandOutcome.Failed("RestoreRecoveryRequired", "Resolve the pending restore recovery before starting or backing up this server.");
         ProcessSupervisorResolution resolution = supervisors.Resolve(
             command.ServerInstanceId,
             new ProcessSupervisorRequest(
@@ -162,6 +168,11 @@ public sealed class AgentCommandExecutor(
                 cancellationToken),
             AgentCommandType.CreateBackup when backups is not null => await backups.CreateAsync(
                 command, resolution.Supervisor, cancellationToken),
+            AgentCommandType.RestoreBackup or AgentCommandType.PruneBackups when maintenance is not null =>
+                await maintenance.ExecuteAsync(command, resolution.Supervisor,
+                    (backupId, token) => retry.ExecuteAsync(
+                        cancellation => apiClient.ConfirmBackupDeletedAsync(credential, command, backupId, cancellation), token),
+                    cancellationToken),
             _ => AgentCommandOutcome.Failed(
                 "UnsupportedCommandType",
                 "The command type is not supported by this Agent."),

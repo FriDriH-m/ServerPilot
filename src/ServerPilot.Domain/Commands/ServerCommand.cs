@@ -44,6 +44,22 @@ public sealed class ServerCommand
     public string? ErrorMessage { get; private set; }
     public int AttemptCount { get; private set; }
     public Guid CorrelationId { get; private set; }
+    public IReadOnlyList<Backups.BackupReference> BackupTargets { get; private set; } = [];
+
+    public static ServerCommand CreateBackupOperation(Guid id, Guid agentId, Guid serverInstanceId,
+        ServerCommandType type, DateTimeOffset createdAt, Guid correlationId,
+        IReadOnlyList<Backups.BackupReference> targets)
+    {
+        if (type is not (ServerCommandType.RestoreBackup or ServerCommandType.PruneBackups) ||
+            targets.Count is < 1 or > 1000 ||
+            (type == ServerCommandType.RestoreBackup && targets.Count != 1) ||
+            targets.Select(item => item.Id).Distinct().Count() != targets.Count ||
+            targets.Any(item => item.Id == Guid.Empty || !Backups.Backup.IsValidArtifact(item.SizeBytes, item.Checksum)))
+            throw new ArgumentException("Invalid backup operation targets.", nameof(targets));
+        var command = Create(id, agentId, serverInstanceId, type, createdAt, correlationId);
+        command.BackupTargets = targets.ToArray();
+        return command;
+    }
 
     public static ServerCommand Create(
         Guid id,

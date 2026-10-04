@@ -136,6 +136,117 @@ public sealed class LocalBackupTests : IAsyncLifetime, IDisposable
         return (await response.Content.ReadFromJsonAsync<Identifier>())!.Id;
     }
 
+    [Fact]
+    public async Task RestoreUsesOwnedCompletedArtifactAndBlocksConcurrentCommands()
+    {
+        var data = await SetupAsync();
+        Guid backupId = await CompleteBackupAsync(data);
+        var stranger = await SetupAsync();
+        string route = $"/api/server-instances/{data.ServerId}/backups/{backupId}/restore";
+        using var foreign = await SendAsync("Bearer", stranger.Token, HttpMethod.Post, route);
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+        using var wrongServer = await SendAsync("Bearer", data.Token, HttpMethod.Post,
+            $"/api/server-instances/{data.ServerId}/backups/{Guid.NewGuid()}/restore");
+        Assert.Equal(HttpStatusCode.NotFound, wrongServer.StatusCode);
+        using var response = await SendAsync("Bearer", data.Token, HttpMethod.Post, route);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Guid id = (await response.Content.ReadFromJsonAsync<Operation>())!.CommandId;
+        using var conflict = await SendAsync("Bearer", data.Token, HttpMethod.Post, $"/api/server-instances/{data.ServerId}/commands/start");
+        Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+        using var claim = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/agents/{data.AgentId}/commands/claim-next");
+        var payload = JsonDocument.Parse(await claim.Content.ReadAsStringAsync());
+        Assert.Equal("RestoreBackup", payload.RootElement.GetProperty("type").GetString());
+        var target = Assert.Single(payload.RootElement.GetProperty("backupTargets").EnumerateArray());
+        Assert.Equal(backupId, target.GetProperty("id").GetGuid());
+        Assert.Equal(new string('A', 64), target.GetProperty("checksum").GetString());
+        using var start = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/commands/{id}/start");
+        Assert.Equal(HttpStatusCode.NoContent, start.StatusCode);
+        using var foreignComplete = await SendAsync("Agent", stranger.Credential, HttpMethod.Post, $"/api/commands/{id}/complete");
+        Assert.Equal(HttpStatusCode.NotFound, foreignComplete.StatusCode);
+        using var complete = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/commands/{id}/complete");
+        using var replay = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/commands/{id}/complete");
+        Assert.Equal(HttpStatusCode.NoContent, complete.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, replay.StatusCode);
+    }
+
+    [Fact]
+    public async Task RetentionKeepsNewestAndRequiresAuthorizedDeletionAcknowledgements()
+    {
+        var data = await SetupAsync();
+        Guid oldest = await CompleteBackupAsync(data);
+        Guid newest = await CompleteBackupAsync(data);
+        string route = $"/api/server-instances/{data.ServerId}/backups/retention";
+        using var invalid = await SendAsync("Bearer", data.Token, HttpMethod.Post, route, new { KeepCount = 0 });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var responses = await Task.WhenAll(Enumerable.Range(0, 2).Select(_ => SendAsync("Bearer", data.Token,
+            HttpMethod.Post, route, new { KeepCount = 1 })));
+        Guid id;
+        try
+        {
+            Assert.Single(responses, item => item.StatusCode == HttpStatusCode.Conflict);
+            id = (await Assert.Single(responses, item => item.StatusCode == HttpStatusCode.Created).Content.ReadFromJsonAsync<Operation>())!.CommandId;
+        }
+        finally { foreach (var response in responses) response.Dispose(); }
+        using var claim = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/agents/{data.AgentId}/commands/claim-next");
+        using var payload = JsonDocument.Parse(await claim.Content.ReadAsStringAsync());
+        Assert.Equal(oldest, Assert.Single(payload.RootElement.GetProperty("backupTargets").EnumerateArray()).GetProperty("id").GetGuid());
+        using var start = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/commands/{id}/start");
+        using var premature = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/commands/{id}/complete");
+        Assert.Equal(HttpStatusCode.Conflict, premature.StatusCode);
+        var stranger = await SetupAsync();
+        using var foreign = await SendAsync("Agent", stranger.Credential, HttpMethod.Post, $"/api/commands/{id}/deleted-backups/{oldest}");
+        using var unrelated = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/commands/{id}/deleted-backups/{newest}");
+        Assert.Equal(HttpStatusCode.NotFound, foreign.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, unrelated.StatusCode);
+        using var deleted = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/commands/{id}/deleted-backups/{oldest}");
+        using var replay = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/commands/{id}/deleted-backups/{oldest}");
+        Assert.Equal(HttpStatusCode.NoContent, deleted.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, replay.StatusCode);
+        using var complete = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/commands/{id}/complete");
+        Assert.Equal(HttpStatusCode.NoContent, complete.StatusCode);
+        using var history = await SendAsync("Bearer", data.Token, HttpMethod.Get, $"/api/server-instances/{data.ServerId}/backups");
+        var backups = (await history.Content.ReadFromJsonAsync<History>())!.Items;
+        Assert.Equal("Deleted", backups.Single(item => item.Id == oldest).Status);
+        Assert.Equal("Completed", backups.Single(item => item.Id == newest).Status);
+        using var noOp = await SendAsync("Bearer", data.Token, HttpMethod.Post, route, new { KeepCount = 1 });
+        Assert.Equal(HttpStatusCode.NoContent, noOp.StatusCode);
+        using var removedRestore = await SendAsync("Bearer", data.Token, HttpMethod.Post,
+            $"/api/server-instances/{data.ServerId}/backups/{oldest}/restore");
+        Assert.Equal(HttpStatusCode.NotFound, removedRestore.StatusCode);
+    }
+
+    [Fact]
+    public async Task FailedRetentionKeepsDeletingMetadataAndNextPlanResumesIt()
+    {
+        var data = await SetupAsync();
+        Guid oldest = await CompleteBackupAsync(data);
+        await CompleteBackupAsync(data);
+        string route = $"/api/server-instances/{data.ServerId}/backups/retention";
+        using var queued = await SendAsync("Bearer", data.Token, HttpMethod.Post, route, new { KeepCount = 1 });
+        Guid id = (await queued.Content.ReadFromJsonAsync<Operation>())!.CommandId;
+        using var claim = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/agents/{data.AgentId}/commands/claim-next");
+        using var start = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/commands/{id}/start");
+        using var failed = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/commands/{id}/fail",
+            new { ErrorCode = "BackupMaintenanceFailed", ErrorMessage = "Deletion interrupted" });
+        using var retry = await SendAsync("Bearer", data.Token, HttpMethod.Post, route, new { KeepCount = 100 });
+        Assert.Equal(HttpStatusCode.Created, retry.StatusCode);
+        using var retryClaim = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/agents/{data.AgentId}/commands/claim-next");
+        using var payload = JsonDocument.Parse(await retryClaim.Content.ReadAsStringAsync());
+        Assert.Equal(oldest, Assert.Single(payload.RootElement.GetProperty("backupTargets").EnumerateArray()).GetProperty("id").GetGuid());
+    }
+
+    private async Task<Guid> CompleteBackupAsync(Setup data)
+    {
+        Guid id = await QueueAsync(data);
+        await StartAsync(data, id);
+        using var completed = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/commands/{id}/complete-backup",
+            new { SizeBytes = 120L, Checksum = new string('A', 64) });
+        Assert.Equal(HttpStatusCode.NoContent, completed.StatusCode);
+        return id;
+    }
+
+    private sealed record Operation(Guid CommandId);
+
     private async Task StartAsync(Setup data, Guid id)
     {
         using HttpResponseMessage claim = await SendAsync("Agent", data.Credential, HttpMethod.Post, $"/api/agents/{data.AgentId}/commands/claim-next");

@@ -5,6 +5,16 @@ namespace ServerPilot.Application.Backups;
 
 public sealed class BackupService(IBackupRepository backups, TimeProvider timeProvider)
 {
+    public Task<BackupOperationResult> CreateOperationAsync(Guid serverInstanceId, Guid userId,
+        Guid? backupId, int keepCount, CancellationToken token)
+    {
+        if (keepCount is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(keepCount));
+        return backups.CreateOperationAsync(serverInstanceId, userId, backupId, keepCount, timeProvider.GetUtcNow(), token);
+    }
+
+    public Task<AgentCommandTransitionStatus> ConfirmDeletedAsync(Guid commandId, Guid agentId,
+        Guid backupId, CancellationToken token) => backups.ConfirmDeletedAsync(commandId, agentId, backupId, token);
+
     public Task<BackupPage> ListAsync(Guid serverInstanceId, Guid userId,
         ServerCommandHistoryCursor? after, int limit, CancellationToken cancellationToken)
     {

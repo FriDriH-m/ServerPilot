@@ -152,12 +152,17 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext, Ag
             {
                 try
                 {
-                    return await ExecuteClaimAsync(
+                    var delivery = await ExecuteClaimAsync(
                         connection,
                         sql,
                         agentId,
                         claimedAt,
                         cancellationToken);
+                    if (delivery is null) return null;
+                    var targets = await dbContext.ServerCommands.AsNoTracking()
+                        .Where(item => item.Id == delivery.Command.Id)
+                        .Select(item => item.BackupTargets).SingleAsync(cancellationToken);
+                    return delivery with { BackupTargets = targets };
                 }
                 catch (PostgresException exception) when (
                     attempt == 0 && IsActiveAgentCommandConflict(exception))
@@ -283,6 +288,9 @@ internal sealed class ServerCommandRepository(ServerPilotDbContext dbContext, Ag
                 command.Id == commandId &&
                 command.AgentId == agentId &&
                 command.Type != ServerCommandType.CreateBackup &&
+                (command.Type != ServerCommandType.PruneBackups || !dbContext.Backups.Any(backup =>
+                    backup.Status == BackupStatus.Deleting && dbContext.ServerCommands.Any(original =>
+                        original.Id == backup.Id && original.ServerInstanceId == command.ServerInstanceId))) &&
                 command.Status == ServerCommandStatus.Running &&
                 command.StartedAt != null &&
                 command.StartedAt <= utcCompletedAt)

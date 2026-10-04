@@ -124,6 +124,11 @@ public sealed class AgentCommandsController(
         ApplyTransitionAsync(commandId, "complete-backup", (agentId, token) =>
             backups.CompleteAsync(commandId, agentId, request.SizeBytes, request.Checksum, token), cancellationToken);
 
+    [HttpPost("commands/{commandId:guid}/deleted-backups/{backupId:guid}")]
+    public Task<IActionResult> ConfirmDeleted(Guid commandId, Guid backupId, CancellationToken token) =>
+        ApplyTransitionAsync(commandId, "backup-deleted", (agentId, cancellation) =>
+            backups.ConfirmDeletedAsync(commandId, agentId, backupId, cancellation), token);
+
     private async Task<IActionResult> ApplyTransitionAsync(
         Guid commandId,
         string transition,
@@ -184,7 +189,7 @@ public sealed class AgentCommandsController(
                 delivery.ServerInstance.Arguments,
                 delivery.ServerInstance.WorkingDirectory,
                 delivery.ServerInstance.ProcessName,
-                delivery.ServerInstance.DataDirectory));
+                delivery.ServerInstance.DataDirectory), delivery.BackupTargets);
     }
 }
 

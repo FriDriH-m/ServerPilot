@@ -29,6 +29,8 @@ function createManagementApi(): ManagementApi {
     createServerCommand: vi.fn(),
     listServerCommands: vi.fn(),
     listBackups: vi.fn(),
+    restoreBackup: vi.fn(),
+    applyBackupRetention: vi.fn(),
   };
 }
 

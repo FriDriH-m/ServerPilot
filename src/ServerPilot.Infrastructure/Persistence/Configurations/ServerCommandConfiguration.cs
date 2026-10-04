@@ -29,9 +29,13 @@ internal sealed class ServerCommandConfiguration : IEntityTypeConfiguration<Serv
             "server_commands",
             tableBuilder =>
             {
+                tableBuilder.HasCheckConstraint("ck_server_commands_backup_targets",
+                    "jsonb_typeof(backup_targets) = 'array' AND ((type = 4 AND jsonb_array_length(backup_targets) = 1) OR " +
+                    "(type = 5 AND jsonb_array_length(backup_targets) BETWEEN 1 AND 1000) OR " +
+                    "(type IN (1, 2, 3) AND jsonb_array_length(backup_targets) = 0))");
                 tableBuilder.HasCheckConstraint(
                     ValidTypeAndStatusConstraintName,
-                    "type BETWEEN 1 AND 3 AND status BETWEEN 1 AND 7 AND attempt_count >= 0");
+                    "type BETWEEN 1 AND 5 AND status BETWEEN 1 AND 7 AND attempt_count >= 0");
                 tableBuilder.HasCheckConstraint(
                     ValidStateConstraintName,
                     "(status = 1 AND attempt_count = 0 AND claimed_at IS NULL AND " +
@@ -62,6 +66,15 @@ internal sealed class ServerCommandConfiguration : IEntityTypeConfiguration<Serv
         builder.HasKey(command => command.Id).HasName("pk_server_commands");
 
         builder.Property(command => command.Id).HasColumnName("id");
+        builder.Property(command => command.BackupTargets).HasColumnName("backup_targets")
+            .HasColumnType("jsonb").HasDefaultValueSql("'[]'::jsonb")
+            .HasConversion(
+                value => System.Text.Json.JsonSerializer.Serialize(value, (System.Text.Json.JsonSerializerOptions?)null),
+                value => System.Text.Json.JsonSerializer.Deserialize<ServerPilot.Domain.Backups.BackupReference[]>(value, (System.Text.Json.JsonSerializerOptions?)null)!)
+            .Metadata.SetValueComparer(new Microsoft.EntityFrameworkCore.ChangeTracking.ValueComparer<IReadOnlyList<ServerPilot.Domain.Backups.BackupReference>>(
+                (left, right) => left!.SequenceEqual(right!),
+                value => value.Aggregate(0, (hash, item) => HashCode.Combine(hash, item.GetHashCode())),
+                value => value.ToArray()));
         builder.Property(command => command.AgentId).HasColumnName("agent_id").IsRequired();
         builder.Property(command => command.ServerInstanceId)
             .HasColumnName("server_instance_id")

@@ -149,6 +149,8 @@ export interface BackupHistoryPage {
 }
 
 export interface ManagementApi {
+  restoreBackup(accessToken: string, id: string, backupId: string): Promise<{ commandId: string }>;
+  applyBackupRetention(accessToken: string, id: string, keepCount: number): Promise<{ commandId: string } | undefined>;
   listBackups(accessToken: string, id: string, cursor?: string, signal?: AbortSignal): Promise<BackupHistoryPage>;
   listAgents(
     accessToken: string,
@@ -207,6 +209,12 @@ function normalizeBaseUrl(value: string | undefined): string {
 }
 
 export class ServerPilotApi implements AuthenticationApi, ManagementApi {
+  restoreBackup(accessToken: string, id: string, backupId: string): Promise<{ commandId: string }> {
+    return this.send(`/server-instances/${id}/backups/${backupId}/restore`, { method: "POST", accessToken });
+  }
+  applyBackupRetention(accessToken: string, id: string, keepCount: number): Promise<{ commandId: string } | undefined> {
+    return this.send(`/server-instances/${id}/backups/retention`, { method: "POST", accessToken, body: { keepCount } });
+  }
   listBackups(accessToken: string, id: string, cursor?: string, signal?: AbortSignal): Promise<BackupHistoryPage> {
     const query = cursor ? `&cursor=${encodeURIComponent(cursor)}` : "";
     return this.send<BackupHistoryPage>(`/server-instances/${id}/backups?limit=20${query}`, { accessToken, signal });

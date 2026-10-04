@@ -14,7 +14,8 @@ public sealed record AgentServerCommandResponse(
     int AttemptCount,
     Guid CorrelationId,
     string DeliveryKind,
-    AgentServerInstanceConfigurationResponse ServerInstance);
+    AgentServerInstanceConfigurationResponse ServerInstance,
+    IReadOnlyList<ServerPilot.Domain.Backups.BackupReference>? BackupTargets = null);
 
 public sealed record AgentServerInstanceConfigurationResponse(
     string Profile,

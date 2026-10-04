@@ -10,9 +10,9 @@ internal sealed class BackupConfiguration : IEntityTypeConfiguration<Backup>
     public void Configure(EntityTypeBuilder<Backup> builder)
     {
         builder.ToTable("backups", table => table.HasCheckConstraint("ck_backups_valid_artifact",
-            "status BETWEEN 1 AND 4 AND ((status = 3 AND size_bytes > 0 AND size_bytes <= 107374182400 " +
+            "status BETWEEN 1 AND 6 AND ((status IN (3, 5, 6) AND size_bytes > 0 AND size_bytes <= 107374182400 " +
             "AND checksum ~ '^[0-9A-F]{64}$' AND size_bytes IS NOT NULL AND checksum IS NOT NULL) OR " +
-            "(status <> 3 AND size_bytes IS NULL AND checksum IS NULL))"));
+            "(status IN (1, 2, 4) AND size_bytes IS NULL AND checksum IS NULL))"));
         builder.HasKey(backup => backup.Id).HasName("pk_backups");
         builder.Property(backup => backup.Id).HasColumnName("id");
         builder.Property(backup => backup.Status).HasColumnName("status").HasConversion<int>();
