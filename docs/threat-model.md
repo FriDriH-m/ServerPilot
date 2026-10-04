@@ -1,5 +1,14 @@
 # ServerPilot MVP threat model
 
+Issue #42 adds verified local restore and count retention (ADR 0018). Restore checks
+stored checksums/manifest and rejects traversal, Windows device/stream aliases, links,
+duplicates and oversized archives before replacing data. Staging plus retained original
+directories and a durable recovery marker protect process-crash recovery; unresolved
+recovery blocks managed starts. Private ACLs on the data parent and backup roots are
+required against local path replacement races. Retention receives an owner-scoped
+persisted target list, validates each archive and deletes only exact ID-derived files;
+`Deleting`/`Deleted` metadata and assigned-Agent acknowledgements reconcile partial work.
+
 This lightweight model is updated when an active issue introduces a real trust
 boundary. It currently covers user authentication, one-time Agent installation tokens,
 Agent registration, revocable Agent credentials, Windows DPAPI-protected local Agent

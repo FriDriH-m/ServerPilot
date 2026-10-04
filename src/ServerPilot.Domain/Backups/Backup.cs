@@ -6,6 +6,8 @@ public enum BackupStatus
     Running = 2,
     Completed = 3,
     Failed = 4,
+    Deleting = 5,
+    Deleted = 6,
 }
 
 public sealed class Backup

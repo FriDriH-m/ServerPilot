@@ -6,13 +6,18 @@ public sealed record ClaimedAgentCommand(
     AgentCommandType Type,
     Guid CorrelationId,
     string DeliveryKind,
-    ClaimedAgentServerInstance ServerInstance);
+    ClaimedAgentServerInstance ServerInstance,
+    IReadOnlyList<AgentBackupReference>? BackupTargets = null);
+
+public sealed record AgentBackupReference(Guid Id, long SizeBytes, string Checksum);
 
 public enum AgentCommandType
 {
     StartServer = 0,
     StopServer,
     CreateBackup,
+    RestoreBackup,
+    PruneBackups,
 }
 
 public sealed record ClaimedAgentServerInstance(

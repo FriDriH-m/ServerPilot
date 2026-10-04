@@ -4,6 +4,9 @@ namespace ServerPilot.Agent.Api;
 
 public interface IAgentApiClient
 {
+    Task ConfirmBackupDeletedAsync(AgentCredential credential, ClaimedAgentCommand command,
+        Guid backupId, CancellationToken token) => throw new NotSupportedException("Backup deletion reporting is unavailable.");
+
     Task SendHeartbeatAsync(AgentCredential credential, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<AssignedAgentServerInstance>> ListServerInstancesAsync(

@@ -204,7 +204,7 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
                 command.ServerInstance.Arguments,
                 command.ServerInstance.WorkingDirectory,
                 command.ServerInstance.ProcessName,
-                command.ServerInstance.DataDirectory));
+                command.ServerInstance.DataDirectory), command.BackupTargets);
     }
 
     public Task MarkCommandRunningAsync(
@@ -245,6 +245,10 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
     public Task CompleteBackupAsync(AgentCredential credential, ClaimedAgentCommand command,
         BackupArtifact artifact, CancellationToken cancellationToken) =>
         SendTransitionAsync(credential, command, "complete-backup", JsonContent.Create(artifact), cancellationToken);
+
+    public Task ConfirmBackupDeletedAsync(AgentCredential credential, ClaimedAgentCommand command,
+        Guid backupId, CancellationToken token) =>
+        SendTransitionAsync(credential, command, $"deleted-backups/{backupId}", null, token);
 
     private async Task SendTransitionAsync(
         AgentCredential credential,
@@ -372,6 +376,7 @@ public sealed class HttpAgentApiClient(HttpClient httpClient) : IAgentApiClient
 
     private sealed class ClaimNextResponse
     {
+        public AgentBackupReference[]? BackupTargets { get; init; }
         public Guid Id { get; init; }
 
         public Guid AgentId { get; init; }

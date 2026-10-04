@@ -30,7 +30,9 @@ ServerPilot.Agent.Backups.LocalBackupOptions backupOptions = builder.Configurati
     .Get<ServerPilot.Agent.Backups.LocalBackupOptions>() ?? new();
 backupOptions.Validate();
 builder.Services.AddSingleton(backupOptions);
-builder.Services.AddSingleton<ServerPilot.Agent.Backups.ILocalBackupCreator, ServerPilot.Agent.Backups.LocalBackupCreator>();
+builder.Services.AddSingleton<ServerPilot.Agent.Backups.LocalBackupCreator>();
+builder.Services.AddSingleton<ServerPilot.Agent.Backups.ILocalBackupCreator>(services => services.GetRequiredService<ServerPilot.Agent.Backups.LocalBackupCreator>());
+builder.Services.AddSingleton<ServerPilot.Agent.Backups.ILocalBackupMaintenance, ServerPilot.Agent.Backups.LocalBackupMaintenance>();
 builder.Services.AddSingleton<IAgentCredentialStore>(_ =>
     new WindowsProtectedAgentCredentialStore(isWindowsService));
 builder.Services.AddSingleton<IAgentRegistrationClient, HttpAgentRegistrationClient>();

@@ -90,6 +90,8 @@ function createManagementApi(
     createServerCommand: vi.fn(),
     listServerCommands: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
     listBackups: vi.fn().mockResolvedValue({ items: [], nextCursor: null }),
+    restoreBackup: vi.fn(),
+    applyBackupRetention: vi.fn(),
     ...overrides,
   };
 }

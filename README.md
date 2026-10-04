@@ -232,6 +232,7 @@ API
 - [`docs/adr/0015-bounded-process-metrics.md`](docs/adr/0015-bounded-process-metrics.md) — решение по bounded-сбору CPU/RAM/uptime, latest-snapshot persistence и transient Web history.
 - [`docs/adr/0016-bounded-project-zomboid-log-tailing.md`](docs/adr/0016-bounded-project-zomboid-log-tailing.md) — решение по безопасному bounded tail `console.txt`, cursor/retry/rotation semantics и owner-only Web viewer.
 - [`docs/local-backups.md`](docs/local-backups.md) — настройка и ограничения локальных ZIP-backup остановленного Project Zomboid через Agent (issue #41).
+- [`docs/adr/0018-local-restore-and-retention.md`](docs/adr/0018-local-restore-and-retention.md) — проверенное восстановление, recovery-журнал и ручная retention по количеству (issue #42).
 - [`docs/adr/0017-local-backup-publication-and-recovery.md`](docs/adr/0017-local-backup-publication-and-recovery.md) — consistency, filesystem boundary и идемпотентное восстановление backup-команд.
 - [`docs/threat-model.md`](docs/threat-model.md) — актуальные trust boundaries, угрозы и меры защиты MVP.
 - [`AGENTS.md`](AGENTS.md) — правила работы ИИ-агентов с репозиторием.

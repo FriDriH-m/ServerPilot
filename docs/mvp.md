@@ -457,6 +457,11 @@ Agent архивирует dedicated cachedir в локально разрешё
 slice не расширяет базовый MVP до restore, schedules или remote backup storage.
 Consistency и ограничения: [local-backups.md](local-backups.md), ADR 0017.
 
+Post-MVP issue #42 добавляет отдельные `RestoreBackup` и `PruneBackups`: проверенный
+архив восстанавливается через staging и recovery-журнал; ручная retention по количеству
+удаляет только сохранённые цели с подтверждением Agent. Базовый MVP не расширяется.
+Границы безопасности и восстановление после сбоя описаны в ADR 0018 и local-backups.md.
+
 `claim-next` доступен только Agent credential, чей Agent ID точно совпадает с маршрутом.
 Он блокирует строку Agent на время короткого PostgreSQL statement. Уже назначенная этому
 Agent команда в `Claimed` или `Running` выдаётся повторно как `Recovery`; только при её

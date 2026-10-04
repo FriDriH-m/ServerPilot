@@ -1,7 +1,8 @@
 # Local backups through the Windows Agent
 
-Issue #41 adds manual local ZIP creation for the Project Zomboid profile. It does
-not add restore, download, remote storage, schedules or automatic retention.
+Issue #41 adds manual local ZIP creation for the Project Zomboid profile. Issue #42
+adds verified local restore and manually applied count retention. Download, remote
+storage and schedules remain outside this slice.
 
 ## Consistency and setup
 
@@ -58,7 +59,7 @@ Command history continues to show progress through its existing refresh loop.
 
 Command and backup creation share one PostgreSQL transaction and the existing
 per-server active-command constraint. Backup statuses are `Pending`, `Running`,
-`Completed` and `Failed`; command timestamps supply the matching metadata. Terminal
+`Completed`, `Failed`, `Deleting` and `Deleted`; command timestamps supply the matching metadata. Terminal
 result and artifact metadata are committed atomically. An exact duplicate result is
 accepted; different metadata after completion is rejected with 409.
 
@@ -94,8 +95,7 @@ prevents concurrent local execution of the same command.
   `.partial` file when no execution holds its `.lock`. Empty `.lock` files remain and
   are harmless. Do not remove a published ZIP while its result is awaiting delivery.
 
-There is deliberately no archive retention policy in this issue. Operators must
-budget disk space and maintain private destination ACLs. Deleting archives manually
+Operators must budget disk space and maintain private destination ACLs. Deleting archives manually
 does not change historical database metadata. A database migration is included; do
 not roll it back after creating backup commands without an explicit data migration.
 
@@ -107,4 +107,81 @@ failure and lost-result retry. PostgreSQL/API tests exercise ownership, assigned
 authorization, state transitions, metadata validation, transaction uniqueness and
 keyset history. Web tests cover manual refresh, paging, metadata and disabled actions.
 These automated fixtures do not substitute for an operator's restore rehearsal on
-real game data; restore execution is a separate issue.
+a disposable copy of real game data.
+
+## Restore and retention (issue #42)
+
+Update both API and Agent before using these commands. Give the service identity Modify
+access to the data directory **and its parent** (sibling creation and directory rename),
+as well as the backup directory. All those directories and their ancestors must remain
+writable only by trusted operators/service identities. Restored files inherit ACLs from
+the parent; the archive does not preserve ACLs. Use a dedicated data parent and leave
+space for an additional uncompressed copy. Do not start Java, edit the cachedir or change
+its configuration/backup root during restore or while recovery is unresolved.
+
+In Web, stop the server, load backups, choose **Restore** beside a completed archive,
+then confirm replacement. Watch `RestoreBackup` in **Command history** for queued/running/
+completed/failed state. An accepted request is not proof that restoration succeeded.
+Existing data is retained in a sibling `.serverpilot-<server N>-<command N>.original`.
+Inspect the restored files and rehearse starting/stopping the game before explicitly
+removing that exact recovery copy. Retention never removes recovery copies.
+
+- `POST /api/server-instances/{id}/backups/{backupId}/restore` returns 201 with
+  `commandId`. Missing/foreign/non-completed backup: 404. Non-stopped/stale/offline
+  server or conflicting active command: 409. Only same-server, same-cachedir restore
+  is supported. There is no automatic stop or restart.
+- `POST /api/server-instances/{id}/backups/retention` accepts `{ "keepCount": 10 }`
+  (integer 1–1000). It keeps the newest completed archives, ordered by creation time
+  then ID, and queues `PruneBackups`. It returns 204 if no work remains or 201 with a
+  command ID. Apply the count each time; this is not a persisted schedule or automatic
+  cleanup after every backup. A command handles at most 1000 files; apply again for
+  larger collections. Web defaults to 10 and requires explicit deletion confirmation.
+- Selected archives become `Deleting` until the Agent confirms removal, then `Deleted`.
+  They are no longer offered for restore. Original creation timestamps, checksum and
+  size remain available for audit. Refresh backup metadata after command completion.
+- The assigned running Agent reports each deletion through
+  `POST /api/commands/{commandId}/deleted-backups/{backupId}`. Only targets in that
+  command's persisted plan are accepted. Retry is idempotent. The Agent never recursively
+  deletes directories or removes arbitrary ZIPs. Corrupted/replaced archives fail closed.
+- After a failed retention command, apply retention again. Unresolved `Deleting` items
+  are retried first, even if the newly requested count is larger. An absent planned file
+  is acknowledged as deleted; a mismatched existing file requires operator investigation.
+
+### Restore journal and manual recovery
+
+The server's backup folder holds `restore-<command N>.json` receipts and
+`restore-recovery.json`; both contain IDs, an opaque source identifier and a state,
+never credentials. `Prepared` precedes extraction; `Completed` means the staged copy
+was published; `RolledBack` means the pre-restore tree was put back. Source data is
+untouched until checksum/content validation and full staging have succeeded.
+
+A marker left after failure blocks managed StartServer/CreateBackup and retention.
+Keep the Agent's backup-root configuration unchanged so this guard remains effective.
+A failure before staging does not need recovery. A host interruption between renames
+is rolled back on replay; interruption after publication records success without a
+second restore. A completed receipt also makes lost terminal acknowledgements harmless.
+
+For `RestoreRecoveryRequired`, stop the Agent and ensure **all** processes using this
+cachedir are stopped. Record the server/command IDs from the journal and derive only
+these exact sibling paths: `.serverpilot-<server N>-<command N>.staging` and `.original`.
+Check canonical paths, ACLs and absence of links before any manual move or deletion.
+
+1. Current directory exists, `.original` is absent, `.staging` exists: extraction was
+   interrupted before publication. Current data is intact. Inspect and remove only that
+   staging directory, then the exact recovery marker. Retain the receipt for diagnosis;
+   a new confirmed restore uses a new command ID.
+2. Current directory is absent and `.original` exists: rename that original back to
+   the configured data directory. Keep staging for investigation. Only after verifying
+   the returned data, remove the exact marker and let the outstanding command resolve.
+3. Current and `.original` exist, staging is absent: the restored copy was published.
+   The Agent normally records completion on recovery. Preserve both copies if manual
+   investigation is needed; do not blindly apply the restore again.
+4. Any other layout, invalid journal, links or unrelated files: preserve everything and
+   investigate. Do not clear the marker until one complete, verified data tree is in
+   place. A rollback failure is deliberately not concealed as success.
+
+`RestoreRequiresStoppedServer`, `RestoreRolledBack`, `RestoreRecoveryRequired`,
+`BackupMaintenanceFailed` and `BackupMaintenanceTimedOut` are safe public failure codes.
+Hardware/power-loss durability beyond filesystem flush/rename guarantees, external
+writers, cross-machine restore and automatic cleanup of recovery directories are not
+covered. See [ADR 0018](adr/0018-local-restore-and-retention.md).

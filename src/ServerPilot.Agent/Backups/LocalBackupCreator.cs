@@ -19,7 +19,7 @@ public interface ILocalBackupCreator
 public sealed partial class LocalBackupCreator(LocalBackupOptions options, ILogger<LocalBackupCreator> logger)
     : ILocalBackupCreator
 {
-    private const string ManifestName = ".serverpilot-backup.json";
+    internal const string ManifestName = ".serverpilot-backup.json";
     private const int BufferSize = 64 * 1024;
 
     public async Task<AgentCommandOutcome> CreateAsync(ClaimedAgentCommand command,
@@ -142,10 +142,15 @@ public sealed partial class LocalBackupCreator(LocalBackupOptions options, ILogg
         }
     }
 
-    private async Task<AgentCommandOutcome> ReadArtifactAsync(string path, Manifest expected, CancellationToken token)
+    internal async Task<AgentCommandOutcome> ReadArtifactAsync(string path, Manifest expected, CancellationToken token)
     {
         await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
             BufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return await ReadArtifactAsync(input, expected, token);
+    }
+
+    internal async Task<AgentCommandOutcome> ReadArtifactAsync(Stream input, Manifest expected, CancellationToken token)
+    {
         if (input.Length is <= 0 or > 100L * 1024 * 1024 * 1024)
             throw new InvalidDataException("Invalid archive size.");
         using (var zip = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: true))
@@ -190,7 +195,7 @@ public sealed partial class LocalBackupCreator(LocalBackupOptions options, ILogg
         return new AgentCommandOutcome(true, null, null, null, new BackupArtifact(input.Length, checksum));
     }
 
-    private IEnumerable<string> EnumerateSource(string root, CancellationToken token)
+    internal IEnumerable<string> EnumerateSource(string root, CancellationToken token)
     {
         int entries = 0;
         IEnumerable<string> Walk(string directory, int depth)
@@ -212,7 +217,7 @@ public sealed partial class LocalBackupCreator(LocalBackupOptions options, ILogg
         return Walk(root, 0);
     }
 
-    private static async Task<bool> IsStoppedAsync(ClaimedAgentCommand command,
+    internal static async Task<bool> IsStoppedAsync(ClaimedAgentCommand command,
         IProcessSupervisor supervisor, CancellationToken token)
     {
         if ((await supervisor.InspectAsync(token)).Status != ProcessSupervisorStatus.NotRunning) return false;
@@ -228,7 +233,7 @@ public sealed partial class LocalBackupCreator(LocalBackupOptions options, ILogg
         return new FileStamp(info.Length, info.LastWriteTimeUtc);
     }
 
-    private static string ValidateDirectory(string path)
+    internal static string ValidateDirectory(string path)
     {
         if (!Path.IsPathFullyQualified(path) || path.StartsWith("\\\\", StringComparison.Ordinal) ||
             path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Any(part => part is "." or ".."))
@@ -246,11 +251,11 @@ public sealed partial class LocalBackupCreator(LocalBackupOptions options, ILogg
         return full;
     }
 
-    private static bool IsWithin(string path, string root) =>
+    internal static bool IsWithin(string path, string root) =>
         string.Equals(path, root, StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
-    private static void RejectLinkIfExists(string path)
+    internal static void RejectLinkIfExists(string path)
     {
         try
         {
@@ -270,10 +275,12 @@ public sealed partial class LocalBackupCreator(LocalBackupOptions options, ILogg
     private static AgentCommandOutcome Failed(string code) =>
         AgentCommandOutcome.Failed(code, "Local backup could not be completed. Check the Agent configuration, stopped state, file access and disk space.");
 
-    private static void ValidateEntryName(string name)
+    internal static void ValidateEntryName(string name)
     {
         if (name == ManifestName || name.Contains('\\') || name.Contains(':') || name.Length > 1024 ||
-            name.Split('/').Any(part => part is "." or ".." or ""))
+            name.Split('/').Length > 64 || name.Any(character => char.IsControl(character) || "<>\"|?*".Contains(character)) ||
+            name.Split('/').Any(part => part is "." or ".." or "" || part.EndsWith('.') || part.EndsWith(' ') ||
+                System.Text.RegularExpressions.Regex.IsMatch(part, @"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])($|\.)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)))
             throw new InvalidDataException("Unsafe archive entry.");
     }
 
@@ -287,6 +294,6 @@ public sealed partial class LocalBackupCreator(LocalBackupOptions options, ILogg
         hash.AppendData(bytes);
     }
 
-    private sealed record Manifest(Guid CommandId, Guid ServerInstanceId, string SourceIdentifier, string? ContentChecksum = null);
+    internal sealed record Manifest(Guid CommandId, Guid ServerInstanceId, string SourceIdentifier, string? ContentChecksum = null);
     private sealed record FileStamp(long Length, DateTime LastWriteTimeUtc);
 }
